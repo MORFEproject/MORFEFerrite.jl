@@ -15,7 +15,12 @@ module ParametricStructural
 # General multivariate θ-series algebra (det/adj/reciprocal over a MultiindexSet box).
 include("theta_series.jl")
 
+# General parametric geometric nonlinearity (quadratic + cubic) + MultilinearMap wrappers.
+include("nonlinearity.jl")
+
 export ThetaBasis, nterms, jacobian_series, det_adj_series,
-	reciprocal_series, inv_det_power, poly_mul, poly_dot, poly_contract
+	reciprocal_series, inv_det_power, poly_mul, poly_dot, poly_contract,
+	ParametricGeometricNonlinearity, multilinear_maps,
+	evaluate_theta_quadratic!, evaluate_theta_cubic!
 
 end # module ParametricStructural
