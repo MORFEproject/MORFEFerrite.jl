@@ -18,9 +18,13 @@ include("theta_series.jl")
 # General parametric geometric nonlinearity (quadratic + cubic) + MultilinearMap wrappers.
 include("nonlinearity.jl")
 
+# General parametric linear K/M assembly + K/C/M corrections.
+include("linear.jl")
+
 export ThetaBasis, nterms, jacobian_series, det_adj_series,
 	reciprocal_series, inv_det_power, poly_mul, poly_dot, poly_contract,
 	ParametricGeometricNonlinearity, multilinear_maps,
-	evaluate_theta_quadratic!, evaluate_theta_cubic!
+	evaluate_theta_quadratic!, evaluate_theta_cubic!,
+	assemble_parametric_K_M!, build_K_corrections, build_C_corrections, build_M_corrections
 
 end # module ParametricStructural
