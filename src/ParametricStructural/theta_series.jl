@@ -33,12 +33,22 @@ exponent→position lookup. Position 1 is always the zero multiindex
 struct ThetaBasis{Nθ}
 	mset::MultiindexSet{Nθ}
 	index::Dict{SVector{Nθ, Int}, Int}
+	prod::Vector{NTuple{3, Int}}   # (i,j,k): exps[i]+exps[j] = exps[k], k in box
 end
 
 function ThetaBasis(bounds::AbstractVector{<:Integer})
 	mset = all_multiindices_in_box(collect(Int, bounds))
-	index = Dict(e => i for (i, e) in enumerate(mset.exponents))
-	return ThetaBasis{length(bounds)}(mset, index)
+	exps = mset.exponents
+	index = Dict(e => i for (i, e) in enumerate(exps))
+	# Precompute the truncated-product index table once (keeps the hot poly ops
+	# free of Dict lookups — the difference between usable and unusably slow).
+	prod = NTuple{3, Int}[]
+	L = length(exps)
+	for i in 1:L, j in 1:L
+		k = get(index, exps[i] + exps[j], 0)
+		k == 0 || push!(prod, (i, j, k))
+	end
+	return ThetaBasis{length(bounds)}(mset, index, prod)
 end
 
 nterms(b::ThetaBasis) = length(b.mset.exponents)
@@ -49,20 +59,11 @@ nterms(b::ThetaBasis) = length(b.mset.exponents)
 # C[γ] = Σ_{α+β=γ, α,β,γ ∈ box} op(A[α], B[β]).  `op` is *, ⋅ or ⊡.
 @inline function _series_convolve(op, A::AbstractVector, B::AbstractVector,
 	basis::ThetaBasis)
-	exps = basis.mset.exponents
-	L = length(exps)
 	R = typeof(op(A[1], B[1]))
-	out = fill(zero(R), L)
-	@inbounds for i in 1:L
-		iszero(A[i]) && continue
-		ai = A[i]
-		for j in 1:L
-			iszero(B[j]) && continue
-			γ = exps[i] + exps[j]
-			k = get(basis.index, γ, 0)
-			k == 0 && continue
-			out[k] += op(ai, B[j])
-		end
+	out = fill(zero(R), length(basis.mset.exponents))
+	@inbounds for (i, j, k) in basis.prod
+		(iszero(A[i]) || iszero(B[j])) && continue
+		out[k] += op(A[i], B[j])
 	end
 	return out
 end

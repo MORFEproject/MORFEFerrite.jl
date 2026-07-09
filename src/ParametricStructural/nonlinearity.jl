@@ -63,21 +63,35 @@ struct ParametricGeometricNonlinearity{N_input, Nθ, G}
 	free_to_local::Dict{Int, Int}
 	n_free::Int
 	basis::ThetaBasis{Nθ}
+	# Geometry θ-series cached per (cell, qp) — independent of u and α, so computed
+	# once here instead of on every closure call in the cohomological solve.
+	adj_cache::Vector{Vector{Vector{Tens3}}}        # [cell][qp] → adj J series
+	invdet_cache::Vector{Vector{Vector{Float64}}}   # [cell][qp] → (1/det J)^N_input series
 end
 
 function ParametricGeometricNonlinearity{N_input}(dh, cv, λ, μ, geom,
 	free_to_local, n_free, basis::ThetaBasis{Nθ}) where {N_input, Nθ}
+	adj_cache = Vector{Vector{Tens3}}[]
+	invdet_cache = Vector{Vector{Float64}}[]
+	for cell in CellIterator(dh)
+		reinit!(cv, cell)
+		coords = getcoordinates(cell)
+		acell = Vector{Tens3}[]
+		icell = Vector{Float64}[]
+		for q in 1:getnquadpoints(cv)
+			x₀ = spatial_coordinate(cv, q, coords)
+			J = jacobian_series(geom(x₀), basis)
+			det_ser, adj_ser = det_adj_series(J, basis)
+			inv_det = reciprocal_series(det_ser, basis)
+			push!(acell, adj_ser)
+			push!(icell, inv_det_power(inv_det, N_input, basis))
+		end
+		push!(adj_cache, acell)
+		push!(invdet_cache, icell)
+	end
 	return ParametricGeometricNonlinearity{N_input, Nθ, typeof(geom)}(
-		dh, cv, Float64(λ), Float64(μ), geom, free_to_local, n_free, basis)
-end
-
-# --- per-QP inv_det^n helper -----------------------------------------
-@inline function _qp_series(pgn, x₀)
-	Js = pgn.geom(x₀)
-	J = jacobian_series(Js, pgn.basis)
-	det_ser, adj_ser = det_adj_series(J, pgn.basis)
-	inv_det = reciprocal_series(det_ser, pgn.basis)
-	return adj_ser, inv_det
+		dh, cv, Float64(λ), Float64(μ), geom, free_to_local, n_free, basis,
+		adj_cache, invdet_cache)
 end
 
 # --- quadratic θ-coefficient ----------------------------------------
@@ -96,17 +110,16 @@ function evaluate_theta_quadratic!(res::AbstractVector{T},
 	nd = ndofs_per_cell(pgn.dh)
 	u₁e = zeros(T, nd); u₂e = zeros(T, nd); re = zeros(T, nd)
 
-	for cell in CellIterator(pgn.dh)
+	for (ci, cell) in enumerate(CellIterator(pgn.dh))
 		reinit!(cv, cell)
-		dofs = celldofs(cell); coords = getcoordinates(cell)
+		dofs = celldofs(cell)
 		gather_local!(u₁e, u₁, dofs, pgn.free_to_local)
 		gather_local!(u₂e, u₂, dofs, pgn.free_to_local)
 		fill!(re, zero(T))
 		for q in 1:getnquadpoints(cv)
 			dΩ₀ = getdetJdV(cv, q)
-			x₀ = spatial_coordinate(cv, q, coords)
-			adj_ser, inv_det = _qp_series(pgn, x₀)
-			inv_det2 = poly_mul(inv_det, inv_det, basis)
+			adj_ser = pgn.adj_cache[ci][q]
+			inv_det2 = pgn.invdet_cache[ci][q]   # (1/det)² (N_input = 2)
 
 			∇u1 = function_gradient(cv, q, u₁e)
 			∇u2 = function_gradient(cv, q, u₂e)
@@ -150,18 +163,17 @@ function evaluate_theta_cubic!(res::AbstractVector{T},
 	nd = ndofs_per_cell(pgn.dh)
 	u₁e = zeros(T, nd); u₂e = zeros(T, nd); u₃e = zeros(T, nd); re = zeros(T, nd)
 
-	for cell in CellIterator(pgn.dh)
+	for (ci, cell) in enumerate(CellIterator(pgn.dh))
 		reinit!(cv, cell)
-		dofs = celldofs(cell); coords = getcoordinates(cell)
+		dofs = celldofs(cell)
 		gather_local!(u₁e, u₁, dofs, pgn.free_to_local)
 		gather_local!(u₂e, u₂, dofs, pgn.free_to_local)
 		gather_local!(u₃e, u₃, dofs, pgn.free_to_local)
 		fill!(re, zero(T))
 		for q in 1:getnquadpoints(cv)
 			dΩ₀ = getdetJdV(cv, q)
-			x₀ = spatial_coordinate(cv, q, coords)
-			adj_ser, inv_det = _qp_series(pgn, x₀)
-			inv_det3 = poly_mul(poly_mul(inv_det, inv_det, basis), inv_det, basis)
+			adj_ser = pgn.adj_cache[ci][q]
+			inv_det3 = pgn.invdet_cache[ci][q]   # (1/det)³ (N_input = 3)
 
 			∇u1a = ∇adj_series(function_gradient(cv, q, u₁e), adj_ser)
 			∇u2a = ∇adj_series(function_gradient(cv, q, u₂e), adj_ser)
