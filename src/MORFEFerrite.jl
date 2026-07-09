@@ -33,8 +33,11 @@ export load_comsol_grid
 export write_paraview_mesh, write_paraview_modes,
 	write_paraview_manifold, write_paraview_deformation
 
-# Re-export the StructuralSVK public API.
+# Re-export the StructuralSVK public API. `save_rom` is intentionally NOT
+# re-exported here: it clashes with the `save_rom(dirs, W, R)` helper that the
+# low-level example includes from `examples/common/results_io.jl`. Reach it as
+# `MORFEFerrite.save_rom` or `MORFEFerrite.StructuralSVK.save_rom`.
 export SVKMaterial, RayleighDamping, HarmonicForcing,
-	mechanical_model, parametrise, real_dynamics, print_equations, save_rom
+	mechanical_model, parametrise, real_dynamics, print_equations
 
 end # module MORFEFerrite

@@ -1,2 +1,5 @@
 Manifest.toml
 /test/Manifest.toml
+
+# Generated example outputs
+examples/*/results/
