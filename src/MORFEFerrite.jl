@@ -24,8 +24,10 @@ using .Common
 include("StructuralSVK/StructuralSVK.jl")
 using .StructuralSVK
 
+include("ParametricStructural/ParametricStructural.jl")
+using .ParametricStructural
+
 # Later migration stages:
-# include("ParametricStructural/ParametricStructural.jl"); using .ParametricStructural
 # include("FluidNavierStokes/FluidNavierStokes.jl");       using .FluidNavierStokes
 
 # Re-export the Common public API.
