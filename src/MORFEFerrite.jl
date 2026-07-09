@@ -1,5 +1,33 @@
+"""
+MORFEFerrite — Ferrite.jl FEM backends and high-level UIs for MORFE.jl.
+
+Umbrella package organised into per-physics submodules over a FEM-backend-agnostic
+MORFE core (which owns the `FEMMultilinearMap` interface):
+
+- `Common`            — shared Ferrite backend layer (mesh IO, Paraview/VTK export).
+- `StructuralSVK`     — St. Venant-Kirchhoff "mesh → ROM" UI (autonomous / harmonic forcing).
+- `ParametricStructural` — geometric-parameter (θ-series) structural ROMs (uses `StructuralSVK`).
+- `FluidNavierStokes` — incompressible cylinder-flow DPIM.
+
+VTK export (`write_paraview_*`) is provided by the `MORFEFerriteWriteVTKExt`
+extension, activated by `using WriteVTK`.
+"""
 module MORFEFerrite
 
-greet() = print("Hello World!")
+using MORFE
+
+# Shared Ferrite backend layer (mesh IO, Paraview/VTK export stubs).
+include("common/Common.jl")
+using .Common
+
+# Per-physics submodules (added in later migration stages):
+# include("StructuralSVK/StructuralSVK.jl");               using .StructuralSVK
+# include("ParametricStructural/ParametricStructural.jl"); using .ParametricStructural
+# include("FluidNavierStokes/FluidNavierStokes.jl");       using .FluidNavierStokes
+
+# Re-export the Common public API.
+export load_comsol_grid
+export write_paraview_mesh, write_paraview_modes,
+	write_paraview_manifold, write_paraview_deformation
 
 end # module MORFEFerrite
