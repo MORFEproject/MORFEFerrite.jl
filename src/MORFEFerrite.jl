@@ -20,8 +20,11 @@ using MORFE
 include("common/Common.jl")
 using .Common
 
-# Per-physics submodules (added in later migration stages):
-# include("StructuralSVK/StructuralSVK.jl");               using .StructuralSVK
+# Per-physics submodules.
+include("StructuralSVK/StructuralSVK.jl")
+using .StructuralSVK
+
+# Later migration stages:
 # include("ParametricStructural/ParametricStructural.jl"); using .ParametricStructural
 # include("FluidNavierStokes/FluidNavierStokes.jl");       using .FluidNavierStokes
 
@@ -29,5 +32,9 @@ using .Common
 export load_comsol_grid
 export write_paraview_mesh, write_paraview_modes,
 	write_paraview_manifold, write_paraview_deformation
+
+# Re-export the StructuralSVK public API.
+export SVKMaterial, RayleighDamping, HarmonicForcing,
+	mechanical_model, parametrise, real_dynamics, print_equations, save_rom
 
 end # module MORFEFerrite
