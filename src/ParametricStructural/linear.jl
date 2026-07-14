@@ -42,7 +42,7 @@ function assemble_parametric_K_M!(K_arr::Vector, M_arr::Vector,
 		for q in 1:getnquadpoints(cv)
 			dΩ₀ = getdetJdV(cv, q)
 			x₀ = spatial_coordinate(cv, q, coords)
-			J = jacobian_series(geom(x₀), basis)
+			J = jacobian_series(_geom_at(geom, x₀, cell, cv, q), basis)
 			det_ser, adj_ser = det_adj_series(J, basis)
 			inv_det = reciprocal_series(det_ser, basis)
 			for i in 1:nbf
