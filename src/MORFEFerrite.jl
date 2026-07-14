@@ -27,8 +27,8 @@ using .StructuralSVK
 include("ParametricStructural/ParametricStructural.jl")
 using .ParametricStructural
 
-# Later migration stages:
-# include("FluidNavierStokes/FluidNavierStokes.jl");       using .FluidNavierStokes
+include("FluidNavierStokes/FluidNavierStokes.jl")
+using .FluidNavierStokes
 
 # Re-export the Common public API.
 export load_comsol_grid
