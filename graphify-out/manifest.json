@@ -1,0 +1,302 @@
+{
+  "examples/01_clamped_beam_ferrite/low_level.jl": {
+    "mtime": 1784027613.6107306,
+    "ast_hash": "4ef3a6361267ab28a9f92b4b6ad772a8",
+    "semantic_hash": ""
+  },
+  "examples/01_clamped_beam_ferrite/main.jl": {
+    "mtime": 1784027613.6095276,
+    "ast_hash": "8f1e0a50a5fce084fa5e5d7b1953c414",
+    "semantic_hash": ""
+  },
+  "examples/01_clamped_beam_ferrite/validate.jl": {
+    "mtime": 1783626223.6477976,
+    "ast_hash": "c67a54d0a9e43e620c26a1d7ecc4107c",
+    "semantic_hash": ""
+  },
+  "examples/03_arch_comsol_wedge/main.jl": {
+    "mtime": 1784027613.6088898,
+    "ast_hash": "eaed91a955a8f271645575fdab88a020",
+    "semantic_hash": ""
+  },
+  "examples/03_arch_comsol_wedge/mesh/load_mesh.jl": {
+    "mtime": 1784027519.9592273,
+    "ast_hash": "e16d5501228862f5d1e71d5bb39303af",
+    "semantic_hash": ""
+  },
+  "examples/03_arch_comsol_wedge/tools/node_dof_table.jl": {
+    "mtime": 1784027519.959766,
+    "ast_hash": "b9f8d6b69a995e9d4cfe6ff718947ae0",
+    "semantic_hash": ""
+  },
+  "examples/03_arch_comsol_wedge/tools/visualise_structure_and_modes.jl": {
+    "mtime": 1784027519.9594233,
+    "ast_hash": "39106c855340a73546cb0b5fc50d5e26",
+    "semantic_hash": ""
+  },
+  "examples/04_parametric_clamped_beam/main.jl": {
+    "mtime": 1784027613.6083076,
+    "ast_hash": "ece267242570895f174abb5f3848efef",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/compare_orders.py": {
+    "mtime": 1784026741.540274,
+    "ast_hash": "55e37a48e96fbff58166072e280f0b52",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/config.jl": {
+    "mtime": 1784026741.53778,
+    "ast_hash": "89fb9b65d33b2ee7ab11799eea9d6093",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/exports.jl": {
+    "mtime": 1784026741.5382771,
+    "ast_hash": "6730f0039f26239c077ff855a987d45b",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/fem/mesh.jl": {
+    "mtime": 1784026741.54317,
+    "ast_hash": "5f5d1bb36e184d24c3a733ab3c183d29",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/fom_reference.jl": {
+    "mtime": 1784026795.9908652,
+    "ast_hash": "cf80a4d9192c6b772b0e9844700c50ac",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/main.jl": {
+    "mtime": 1784027613.6100464,
+    "ast_hash": "f3c01ba0ceb391b80a33145379d8a367",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/solve_rom.jl": {
+    "mtime": 1784026741.5388126,
+    "ast_hash": "7ac9c00923b37a15411c0970569b7f3a",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/solver/eigensolver.jl": {
+    "mtime": 1784026741.5472286,
+    "ast_hash": "c1fd9afa76ddb0d8f88b06d9d8eb84ba",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/solver/picard_orbit.jl": {
+    "mtime": 1784026741.5488155,
+    "ast_hash": "2820b43f07cf01761fe2473ca7300ae2",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/solver/rom_palc.jl": {
+    "mtime": 1784026741.5478566,
+    "ast_hash": "d90da8c80239df9da4f0c4d5efed9609",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/solver/time_integration.jl": {
+    "mtime": 1784026741.5484107,
+    "ast_hash": "a0c05c5f29dd72f2b42366bedb37f077",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/validation/validate_tke.jl": {
+    "mtime": 1784026795.9910576,
+    "ast_hash": "219c2e2688f67989262ba17fe47200cd",
+    "semantic_hash": ""
+  },
+  "examples/07_parametric_arch/config.jl": {
+    "mtime": 1783629969.1336124,
+    "ast_hash": "72d41186b5813fb9b37c78f55d2eff8f",
+    "semantic_hash": ""
+  },
+  "examples/07_parametric_arch/fem/arch_geometry.jl": {
+    "mtime": 1783629969.14344,
+    "ast_hash": "555c344610fef712d9d43a98a84fdd71",
+    "semantic_hash": ""
+  },
+  "examples/07_parametric_arch/main.jl": {
+    "mtime": 1784027613.6076028,
+    "ast_hash": "6e166f039ecab065709679849101c4fb",
+    "semantic_hash": ""
+  },
+  "examples/08_mems_micromirror/main.jl": {
+    "mtime": 1784027633.7450833,
+    "ast_hash": "29da4619ce5c3c90c038a0099a984a8f",
+    "semantic_hash": ""
+  },
+  "examples/08_mems_micromirror/mesh.jl": {
+    "mtime": 1784027633.745249,
+    "ast_hash": "3b7ba28d48b7e813ad75dbc369c6d10f",
+    "semantic_hash": ""
+  },
+  "examples/common/results_io.jl": {
+    "mtime": 1783626223.6398637,
+    "ast_hash": "48d0bd3e085dad0b850c7c5356b1f56d",
+    "semantic_hash": ""
+  },
+  "ext/MORFEFerriteWriteVTKExt.jl": {
+    "mtime": 1783604278.6168554,
+    "ast_hash": "20a6446f0782576660a1f0e1ece32088",
+    "semantic_hash": ""
+  },
+  "src/FluidNavierStokes/FluidNavierStokes.jl": {
+    "mtime": 1784026624.634607,
+    "ast_hash": "9f94855798a9550303666e73ec7a182b",
+    "semantic_hash": ""
+  },
+  "src/FluidNavierStokes/energy_gram.jl": {
+    "mtime": 1784026610.0459275,
+    "ast_hash": "9a420685cb31ddb10bd97cf03f8fc393",
+    "semantic_hash": ""
+  },
+  "src/FluidNavierStokes/fem_setup.jl": {
+    "mtime": 1784026966.6765296,
+    "ast_hash": "788703a04e3a2b2f749717a6c7b50de0",
+    "semantic_hash": ""
+  },
+  "src/FluidNavierStokes/fluid_maps.jl": {
+    "mtime": 1784026610.0436373,
+    "ast_hash": "a8571cb6ad2cebc331b5a894b1155e0f",
+    "semantic_hash": ""
+  },
+  "src/FluidNavierStokes/linear_operators.jl": {
+    "mtime": 1784026610.0411804,
+    "ast_hash": "b27de134d2a01e5e7320fc4ac38fa7e1",
+    "semantic_hash": ""
+  },
+  "src/FluidNavierStokes/steady_state.jl": {
+    "mtime": 1784026610.038754,
+    "ast_hash": "cfb271c6acc26a9bf41881f8deff40d5",
+    "semantic_hash": ""
+  },
+  "src/MORFEFerrite.jl": {
+    "mtime": 1784026646.194208,
+    "ast_hash": "c5e3d9be6f11619776b1adb39cbf204b",
+    "semantic_hash": ""
+  },
+  "src/ParametricStructural/ParametricStructural.jl": {
+    "mtime": 1783629680.849794,
+    "ast_hash": "0792822908b6ff7d2a9e1b7d61b52584",
+    "semantic_hash": ""
+  },
+  "src/ParametricStructural/linear.jl": {
+    "mtime": 1784023969.9445124,
+    "ast_hash": "f32bfa15e22886eeeb732470953941f4",
+    "semantic_hash": ""
+  },
+  "src/ParametricStructural/nonlinearity.jl": {
+    "mtime": 1784024905.3880823,
+    "ast_hash": "ceffd2a7efd8351a9f15ee43a6907981",
+    "semantic_hash": ""
+  },
+  "src/ParametricStructural/theta_series.jl": {
+    "mtime": 1783631015.4845617,
+    "ast_hash": "9810aad2aa0e43149c9b8e57ab5f8dd3",
+    "semantic_hash": ""
+  },
+  "src/StructuralSVK/StructuralSVK.jl": {
+    "mtime": 1783604778.225588,
+    "ast_hash": "1a3ac7c26ee5f2cd41df5acd386e5fff",
+    "semantic_hash": ""
+  },
+  "src/StructuralSVK/ferrite_assembly.jl": {
+    "mtime": 1783604732.026016,
+    "ast_hash": "60192ae3012b825475af7d163d3cfee4",
+    "semantic_hash": ""
+  },
+  "src/StructuralSVK/mechanical_model.jl": {
+    "mtime": 1783604759.0010939,
+    "ast_hash": "5c7d98ec883f1b56d1e096cf27301a65",
+    "semantic_hash": ""
+  },
+  "src/StructuralSVK/parametrise.jl": {
+    "mtime": 1783604732.0189013,
+    "ast_hash": "d7b4e369c804d56e64eb7974ffcf2ebb",
+    "semantic_hash": ""
+  },
+  "src/StructuralSVK/postprocess.jl": {
+    "mtime": 1783604732.0228345,
+    "ast_hash": "fbdf334b7e553092274e6fbea4d88f00",
+    "semantic_hash": ""
+  },
+  "src/StructuralSVK/rayleigh_solver.jl": {
+    "mtime": 1783604732.0116851,
+    "ast_hash": "76c96800e6b429f0c6e85c368273bc64",
+    "semantic_hash": ""
+  },
+  "src/StructuralSVK/types.jl": {
+    "mtime": 1783604732.00799,
+    "ast_hash": "abae32507ba6c738cd008643540d4ee8",
+    "semantic_hash": ""
+  },
+  "src/common/Common.jl": {
+    "mtime": 1783604174.9707384,
+    "ast_hash": "5305ea721fc592bc517a723ad6f320d1",
+    "semantic_hash": ""
+  },
+  "src/common/mesh_comsol.jl": {
+    "mtime": 1783604199.7550547,
+    "ast_hash": "32a8eb1ffd312be6da4d0a0efbd5e99b",
+    "semantic_hash": ""
+  },
+  "src/common/paraview.jl": {
+    "mtime": 1783604215.1980026,
+    "ast_hash": "5530edb79f99e45c8c091a61213beaa5",
+    "semantic_hash": ""
+  },
+  "test/StructuralSVK/run_gates.jl": {
+    "mtime": 1783626405.1460025,
+    "ast_hash": "9c98ec3364e8955d527b52430d944b2a",
+    "semantic_hash": ""
+  },
+  "test/StructuralSVK/test_structural_svk.jl": {
+    "mtime": 1783626437.7303154,
+    "ast_hash": "2ce6bed83af13adcec981375e7eccafb",
+    "semantic_hash": ""
+  },
+  "test/bootstrap.jl": {
+    "mtime": 1783604294.7855465,
+    "ast_hash": "c09cfb9207348da76932b1a094e643b3",
+    "semantic_hash": ""
+  },
+  "test/runtests.jl": {
+    "mtime": 1783626452.7570055,
+    "ast_hash": "ba82c8e35fa03ac96ed99e80dbf0fa9b",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1784028410.6133292,
+    "ast_hash": "563f4d7130cc389e59c0f89802e6d1d2",
+    "semantic_hash": ""
+  },
+  "MIGRATION_PLAN.md": {
+    "mtime": 1783600942.0062308,
+    "ast_hash": "41bf868fa4beaaa551db8b1687b8e907",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1783599480.7959464,
+    "ast_hash": "cfa12f8087edf906d1e710fdfbb01d92",
+    "semantic_hash": ""
+  },
+  "examples/01_clamped_beam_ferrite/README.md": {
+    "mtime": 1783626223.6453676,
+    "ast_hash": "dae30a846e0572adfac80cd1fae8fa29",
+    "semantic_hash": ""
+  },
+  "examples/03_arch_comsol_wedge/README.md": {
+    "mtime": 1784027462.9500663,
+    "ast_hash": "b15cd1d349fd8ddc3a4d666a53e188ca",
+    "semantic_hash": ""
+  },
+  "examples/03_arch_comsol_wedge/reference_data/summary_ref.txt": {
+    "mtime": 1784027462.959454,
+    "ast_hash": "6983e155b14115c91079cecd751f9b5e",
+    "semantic_hash": ""
+  },
+  "examples/05_karman_vortex_street/README.md": {
+    "mtime": 1784026741.5398374,
+    "ast_hash": "bf9efa9de28be4c1a44f05d8bafeebcb",
+    "semantic_hash": ""
+  },
+  "examples/08_mems_micromirror/README.md": {
+    "mtime": 1784027561.3179765,
+    "ast_hash": "6a058a92a33c01c383605483d3051ca1",
+    "semantic_hash": ""
+  }
+}
