@@ -8,7 +8,7 @@ Run in the folder:  julia --project main.jl
 
 using Pkg: Pkg
 Pkg.activate(@__DIR__)
-if !haskey(Pkg.project().dependencies, "MORFEFerrite")
+if !isfile(joinpath(@__DIR__, "Manifest.toml"))
 	Pkg.develop([
 		Pkg.PackageSpec(path = joinpath(@__DIR__, "..", "..", "..", "..", "MORFE_jl")),
 		Pkg.PackageSpec(path = joinpath(@__DIR__, "..", "..")),
