@@ -26,8 +26,17 @@ lands. DPIM is graded — lower orders are exact truncations.
 using Pkg: Pkg
 Pkg.activate(@__DIR__)
 if !isfile(joinpath(@__DIR__, "Manifest.toml"))
+	# MORFE.jl is expected as a sibling checkout (folder MORFE.jl or MORFE_jl),
+	# either next to this repository or one directory above it; override with
+	# ENV["MORFE_PATH"] if it lives elsewhere.
+	morfe = get(ENV, "MORFE_PATH", "")
+	if isempty(morfe)
+		cands = [joinpath(@__DIR__, "..", "..", "..", n) for n in ("MORFE.jl", "MORFE_jl")]
+		append!(cands, [joinpath(@__DIR__, "..", "..", "..", "..", n) for n in ("MORFE.jl", "MORFE_jl")])
+		morfe = first(filter(isdir, cands))
+	end
 	Pkg.develop([
-		Pkg.PackageSpec(path = joinpath(@__DIR__, "..", "..", "..", "..", "MORFE_jl")),
+		Pkg.PackageSpec(path = morfe),
 		Pkg.PackageSpec(path = joinpath(@__DIR__, "..", "..")),
 	])
 	Pkg.add(["Ferrite", "FerriteGmsh", "Arpack", "LinearMaps", "StaticArrays", "Tensors"])
