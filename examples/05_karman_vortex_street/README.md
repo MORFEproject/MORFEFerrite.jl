@@ -98,12 +98,7 @@ results/
 | `compare_orders.py` | Step 3 — truncation-order lift / avg-TKE comparison |
 | `fom_reference.jl` | Step 4 — FOM periodic-orbit reference per Re in FOM_REF_RE |
 | `config.jl` | All parameters (Re₀, MAX_ORD, TRUNC_ORDERS, mesh, eigensolver, branch) |
-| `fem/mesh.jl` | Gmsh channel-with-cylinder mesh generation |
-| `fem/fem_setup.jl` | FEM spaces, boundary conditions, DOF sets |
-| `fem/linear_operators.jl` | Linearised NSE operators B₀, B₁ + lift weights |
-| `fem/fluid_maps.jl` | Convection / parametric multilinear maps + K_visc |
-| `fem/energy_gram.jl` | Kinetic-energy Gram matrix for the TKE observable |
-| `solver/steady_state.jl` | Newton solve for the base flow |
+| `fem/mesh.jl` | Gmsh channel-with-cylinder mesh generation (example-local; needs Gmsh) |
 | `solver/eigensolver.jl` | Shift-invert ARPACK Hopf eigensolver |
 | `solver/rom_palc.jl` | Pseudo-arclength continuation toolkit for the ROM branch |
 | `solver/time_integration.jl` | IMEX θ-method FOM integrator (perturbation NSE) |
@@ -112,6 +107,14 @@ results/
 | `validation/run_tke.py` | Single-orbit TKE runner (cross-check) |
 | `validation/validate_tke.jl` | Independent FOM-space TKE check |
 | `validation/generate_matlab.py` | Optional matcont/COCO export (`EXPORT_MATLAB = true`) |
+
+The fluid FEM layer itself lives in the package as
+[`MORFEFerrite.FluidNavierStokes`](../../src/FluidNavierStokes/)
+(`setup_fem`, `solve_steady_state`, `assemble_linear_operators`,
+`FluidConvection`/`make_param_coupling`/`make_base_forcing`, energy-Gram and
+lift helpers) — the driver imports it instead of carrying its own
+`fem/{fem_setup,linear_operators,fluid_maps,energy_gram}.jl` +
+`solver/steady_state.jl`.
 
 ## Validation
 

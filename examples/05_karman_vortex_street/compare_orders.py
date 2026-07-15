@@ -134,8 +134,8 @@ def main():
         if fom_rows:
             fr = np.array([(re, lift, tke) for re, lift, tke, conv in fom_rows if conv])
             if fr.size:
-                plt.plot(fr[:, 0], fr[:, 1] if col == 7 else fr[:, 2], marker="o", lw=0,
-                         markeredgewidth=2,markeredgecolor='k', markerfacecolor='None', label="FOM")
+                plt.plot(fr[:, 0], fr[:, 1] if col == 7 else fr[:, 2], marker="*", ms=13, lw=0,
+                         color="k", label="FOM")
             
         plt.plot([0, arr[0, 2]],[0.0,0.0], color="k", ls="-", marker="o", ms=7, lw=2)
         plt.plot([arr[0, 2], 100],[0.0,0.0], color="k", ls="--", lw=2)
