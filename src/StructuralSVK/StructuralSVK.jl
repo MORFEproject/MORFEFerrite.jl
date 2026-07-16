@@ -16,7 +16,7 @@ backend).
 module StructuralSVK
 
 using MORFE
-import MORFE: parametrise
+import MORFE: parametrise, save_rom
 using Ferrite, FerriteGmsh, Arpack, LinearMaps
 using LinearAlgebra, SparseArrays, Serialization, Printf
 using StaticArrays
