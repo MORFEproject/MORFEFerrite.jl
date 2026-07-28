@@ -1,23 +1,29 @@
 # config.jl — all tunable parameters for the Kármán vortex street DPIM demo.
 # Edit this file to reproduce different figures from arXiv:2510.26542v1.
+#
+# MORFE_FAST=1 selects a smoke profile (coarse mesh, order 3, fewer eigenvalues,
+# ≈ minutes). NOTE: unlike the structural examples, FAST here changes the MESH,
+# so its numbers are not comparable to the full-profile reference — it verifies
+# the pipeline end-to-end, not the physics.
+FAST = get(ENV, "MORFE_FAST", "0") == "1"
 
 # ── Physics ───────────────────────────────────────────────────────────────────
 const Re₀ = 49.03   # expansion Re; paper uses 20, Re_c≈49.03, 70, 80
-const MAX_ORD = 9   # DPIM expansion order (single run — lower orders are truncations)
+const MAX_ORD = FAST ? 3 : 9   # DPIM expansion order (single run — lower orders are truncations)
 # The cohomological solve is graded: coefficients of degree ≤ N never depend on higher
 # degrees, so the order-9 W/R contain the order-N ROMs EXACTLY (verified bit-exact).
-const TRUNC_ORDERS = [3, 5, 7, 9]   # truncation orders for the convergence comparison
+const TRUNC_ORDERS = FAST ? [3] : [3, 5, 7, 9]   # truncation orders for the convergence comparison
 const ROM = 2        # number of Hopf master modes
 const N_EXT = 1        # external parameter dimensions (η′ = 1/Re − 1/Re₀)
 const NVAR = ROM + N_EXT   # = 3
 
 # ── Mesh ──────────────────────────────────────────────────────────────────────
-const MESH_H_CYL = 0.005   # element size on cylinder surface
-const MESH_H_WAKE = 0.015   # element size in the cylinder wake
-const MESH_H_BULK = 0.04    # element size in the bulk channel
+const MESH_H_CYL = FAST ? 0.010 : 0.005   # element size on cylinder surface
+const MESH_H_WAKE = FAST ? 0.030 : 0.015   # element size in the cylinder wake
+const MESH_H_BULK = FAST ? 0.080 : 0.04    # element size in the bulk channel
 
 # ── Eigensolver ───────────────────────────────────────────────────────────────
-const EIG_NEV = 40      # number of eigenvalues to compute and display
+const EIG_NEV = FAST ? 20 : 40      # number of eigenvalues to compute and display
 const EIG_SIGMA_RE = 3.0   # real part of ARPACK shift; offset from the imaginary
 # axis avoids near-singularity when Re(λ_Hopf) ≈ 0
 const EIG_SIGMA_IM = 8.0   # imag part ≈ ω₀/2 (Hopf freq ω₀ ≈ 16.86 rad/s); any

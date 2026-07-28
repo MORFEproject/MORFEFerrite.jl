@@ -33,6 +33,7 @@ to_gb(b) = round(b / 1024^3; digits = 2)
 """
 	export_rom(data_dir, W, R)
 
+(Removed: W.jls/R.jls/R_coefficients.csv are written by `MORFE.save_rom`.)
 Serialise the parametrisation `W.jls` and reduced dynamics `R.jls` (input for
 solve_rom.jl and the validation scripts).
 """
@@ -112,35 +113,12 @@ end
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
-	export_coefficient_csvs(out, data_dir, R, mset, L0, L_coeffs) -> csv_path
+	export_lift_csv(out, data_dir, mset, L0, L_coeffs)
 
-Write `R_coefficients.csv` (all rows of the complex reduced dynamics, one monomial per
-row) and `L_coefficients.csv` (constant base-flow row + lift polynomial). Returns the
-R csv path (input for the optional MATLAB export).
+Write `L_coefficients.csv` (constant base-flow row + lift polynomial).
+`R_coefficients.csv` is written by `MORFE.save_rom` in the driver.
 """
-function export_coefficient_csvs(out::IO, data_dir::AbstractString, R, mset, L0, L_coeffs)
-	csv_path = joinpath(data_dir, "R_coefficients.csv")
-	let
-		exps = R.poly.multiindex_set.exponents
-		coeffs = R.poly.coefficients   # (NVAR, L) ComplexF64
-		NVAR_R = size(coeffs, 1)
-		n_rows = 0
-		open(csv_path, "w") do io
-			header = join(["exp_$i" for i in 1:length(exps[1])], ",") * "," *
-					 join(["R$(i)_re,R$(i)_im" for i in 1:NVAR_R], ",")
-			println(io, header)
-			for (m, ex) in enumerate(exps)
-				c = coeffs[:, m]
-				any(abs.(c) .> 1e-14) || continue
-				row = join(string.(Int.(ex)), ",") * "," *
-					  join(["$(real(c[i])),$(imag(c[i]))" for i in 1:NVAR_R], ",")
-				println(io, row)
-				n_rows += 1
-			end
-		end
-		println(out, "  R_coefficients.csv  ($n_rows rows)")
-	end
-
+function export_lift_csv(out::IO, data_dir::AbstractString, mset, L0, L_coeffs)
 	let
 		lift_csv_path = joinpath(data_dir, "L_coefficients.csv")
 		L_exps = mset.exponents
@@ -158,8 +136,7 @@ function export_coefficient_csvs(out::IO, data_dir::AbstractString, R, mset, L0,
 		end
 		println(out, "  L_coefficients.csv  ($n_L_rows polynomial rows, L0 = $(round(L0; sigdigits=6)))")
 	end
-
-	return csv_path
+	return nothing
 end
 
 """

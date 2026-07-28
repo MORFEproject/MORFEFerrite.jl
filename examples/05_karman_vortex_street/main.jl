@@ -238,7 +238,9 @@ export_reduced_dynamics(_out, DATA_DIR, R, master_eigenvalues;
 
 println(_out, "\n[10/10] Saving ROM and exporting observables ...")
 
-export_rom(DATA_DIR, W, R)
+MORFE.save_rom(RESULTS_DIR, W, R; metadata = [
+	"example" => "05_karman_vortex_street", "Re0" => Re₀,
+	"max_order" => MAX_ORD, "fast" => FAST])
 
 # Lift functional: l picks the pressure traction −p·n_y on the cylinder boundary.
 l_free = compute_pressure_lift_weights(fom)[fom.free_dpim]
@@ -252,7 +254,8 @@ println(_out, "  tke_gram_re.csv, tke_gram_im.csv, tke_avector.csv  written to d
 
 export_vtk_bundle(DATA_DIR, fom, s₀_full, master_eigenvalues, all_eigenvalues, all_modes)
 
-csv_path = export_coefficient_csvs(_out, DATA_DIR, R, mset, L0_lift, L_coeffs_lift)
+export_lift_csv(_out, DATA_DIR, mset, L0_lift, L_coeffs_lift)
+csv_path = joinpath(DATA_DIR, "R_coefficients.csv")
 EXPORT_MATLAB && export_matlab_model(_out, DATA_DIR, csv_path; re0 = Re₀, ord = MAX_ORD)
 
 write_summary(_out, RESULTS_DIR, fom, master_eigenvalues,
