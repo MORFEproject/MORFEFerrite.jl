@@ -16,6 +16,46 @@ Higher-order material models (e.g. polynomial hyperelastic) are needed for
 quartic and higher terms.
 """
 
+# ── Stress models ───────────────────────────────────────────────────────────
+# `_σ(ε, model)` maps a symmetric strain tensor to the 2nd Piola-Kirchhoff
+# stress. The isotropic model routes to the original Lamé expression unchanged.
+abstract type AbstractStress end
+
+struct IsotropicStress <: AbstractStress
+	λ::Float64
+	μ::Float64
+end
+
+"""
+	VoigtStress(D)
+
+Fully anisotropic stress, `σ = D : ε`, with `D` the 6×6 Voigt stiffness in the
+standard ordering `[11, 22, 33, 23, 13, 12]` (engineering shear strains, i.e.
+the strain vector is `[ε₁₁, ε₂₂, ε₃₃, 2ε₂₃, 2ε₁₃, 2ε₁₂]`).
+"""
+struct VoigtStress <: AbstractStress
+	D::SMatrix{6, 6, Float64, 36}
+end
+
+# Lamé stress from a strain tensor.
+@inline _σ(E, λ, μ) = λ * tr(E) * one(E) + 2μ * E
+
+@inline _σ(E, s::IsotropicStress) = _σ(E, s.λ, s.μ)
+
+@inline function _σ(ε, s::VoigtStress)
+	D = s.D
+	e1 = ε[1, 1]; e2 = ε[2, 2]; e3 = ε[3, 3]
+	e4 = 2 * ε[2, 3]; e5 = 2 * ε[1, 3]; e6 = 2 * ε[1, 2]
+	s1 = D[1,1]*e1 + D[1,2]*e2 + D[1,3]*e3 + D[1,4]*e4 + D[1,5]*e5 + D[1,6]*e6
+	s2 = D[2,1]*e1 + D[2,2]*e2 + D[2,3]*e3 + D[2,4]*e4 + D[2,5]*e5 + D[2,6]*e6
+	s3 = D[3,1]*e1 + D[3,2]*e2 + D[3,3]*e3 + D[3,4]*e4 + D[3,5]*e5 + D[3,6]*e6
+	s4 = D[4,1]*e1 + D[4,2]*e2 + D[4,3]*e3 + D[4,4]*e4 + D[4,5]*e5 + D[4,6]*e6
+	s5 = D[5,1]*e1 + D[5,2]*e2 + D[5,3]*e3 + D[5,4]*e4 + D[5,5]*e5 + D[5,6]*e6
+	s6 = D[6,1]*e1 + D[6,2]*e2 + D[6,3]*e3 + D[6,4]*e4 + D[6,5]*e5 + D[6,6]*e6
+	# SymmetricTensor{2,3} takes the lower triangle column-major: (11, 21, 31, 22, 32, 33)
+	return SymmetricTensor{2, 3, Float64}((s1, s6, s5, s2, s4, s3))
+end
+
 # -----------------------------------------------------------------------
 # Concrete FEMMultilinearMap type
 # -----------------------------------------------------------------------
@@ -47,13 +87,12 @@ order 2 (second-order ODE). The term only uses position-derivative inputs
 - `u_e_re`         — real part of u_e, Vector{Float64}(ndofs_per_cell)
 - `u_e_im`         — imaginary part of u_e, Vector{Float64}(ndofs_per_cell)
 """
-struct FerriteGeometricNonlinearity{DEG, DH, CV} <: MORFE.FEMMultilinearMap{2}
+struct FerriteGeometricNonlinearity{DEG, DH, CV, S} <: MORFE.FEMMultilinearMap{2}
 	dh::DH
 	cv::CV
 	free_to_local::Dict{Int, Int}
 	n_free::Int
-	λ::Float64
-	μ::Float64
+	stress::S                      # IsotropicStress or VoigtStress (see below)
 	multiindex::NTuple{2, Int}
 	multiplicity_external::Int
 	deg::Int
@@ -73,9 +112,20 @@ Construct with pre-allocated buffers sized from `cv`.
 function FerriteGeometricNonlinearity{DEG}(
 	dh::DH, cv::CV,
 	free_to_local::Dict{Int, Int}, n_free::Int,
-	λ::Float64, μ::Float64;
+	λ::Real, μ::Real;
 	max_unique_cols::Int = DEG,
 	fully_asymmetric::Union{Nothing, Bool} = false) where {DEG, DH, CV}
+	return FerriteGeometricNonlinearity{DEG}(dh, cv, free_to_local, n_free,
+		IsotropicStress(Float64(λ), Float64(μ));
+		max_unique_cols = max_unique_cols, fully_asymmetric = fully_asymmetric)
+end
+
+function FerriteGeometricNonlinearity{DEG}(
+	dh::DH, cv::CV,
+	free_to_local::Dict{Int, Int}, n_free::Int,
+	stress::S;
+	max_unique_cols::Int = DEG,
+	fully_asymmetric::Union{Nothing, Bool} = false) where {DEG, DH, CV, S <: AbstractStress}
 	n_qp = getnquadpoints(cv)
 	n_dofs = ndofs_per_cell(dh)
 	∇W_qp = Matrix{Tensor{2, 3, ComplexF64}}(undef, max_unique_cols, n_qp)
@@ -83,8 +133,8 @@ function FerriteGeometricNonlinearity{DEG}(
 	u_e = Vector{ComplexF64}(undef, n_dofs)
 	u_e_re = zeros(Float64, n_dofs)
 	u_e_im = zeros(Float64, n_dofs)
-	return FerriteGeometricNonlinearity{DEG, DH, CV}(
-		dh, cv, free_to_local, n_free, λ, μ,
+	return FerriteGeometricNonlinearity{DEG, DH, CV, S}(
+		dh, cv, free_to_local, n_free, stress,
 		(DEG, 0), 0, DEG, fully_asymmetric, ∇W_qp, Fe, u_e, u_e_re, u_e_im)
 end
 
@@ -124,8 +174,7 @@ function MORFE.scatter_qp!(∇W_col, W_free, element, t::FerriteGeometricNonline
 	end
 end
 
-# Lamé stress from a strain tensor.
-@inline _σ(E, λ, μ) = λ * tr(E) * one(E) + 2μ * E
+
 
 # Symmetric Green-Lagrange cross term for two gradients.
 @inline _E_nl(∇u1, ∇u2) = symmetric(
@@ -163,17 +212,17 @@ function MORFE.accumulate_qp!(Fe, ∇W_args::NTuple{2}, mult, _element, q, dΩ,
 
 	E_nl_re = _E_nl_f64(A, C) - _E_nl_f64(B, D)
 	E_nl_im = _E_nl_f64(A, D) + _E_nl_f64(B, C)
-	σ_nl_re = _σ(E_nl_re, t.λ, t.μ)
-	σ_nl_im = _σ(E_nl_im, t.λ, t.μ)
+	σ_nl_re = _σ(E_nl_re, t.stress)
+	σ_nl_im = _σ(E_nl_im, t.stress)
 
 	ε1_re = symmetric(A);
 	ε1_im = symmetric(B)
 	ε2_re = symmetric(C);
 	ε2_im = symmetric(D)
-	σ_ε1_re = _σ(ε1_re, t.λ, t.μ);
-	σ_ε1_im = _σ(ε1_im, t.λ, t.μ)
-	σ_ε2_re = _σ(ε2_re, t.λ, t.μ);
-	σ_ε2_im = _σ(ε2_im, t.λ, t.μ)
+	σ_ε1_re = _σ(ε1_re, t.stress);
+	σ_ε1_im = _σ(ε1_im, t.stress)
+	σ_ε2_re = _σ(ε2_re, t.stress);
+	σ_ε2_im = _σ(ε2_im, t.stress)
 
 	n_dofs = ndofs_per_cell(t.dh)
 	c = mult * dΩ
@@ -226,12 +275,12 @@ function MORFE.accumulate_qp!(Fe, ∇W_args::NTuple{3}, mult, _element, q, dΩ,
 	E12_re = _E_nl_f64(A, C) - _E_nl_f64(B, D);
 	E12_im = _E_nl_f64(A, D) + _E_nl_f64(B, C)
 
-	σ23_re = _σ(E23_re, t.λ, t.μ);
-	σ23_im = _σ(E23_im, t.λ, t.μ)
-	σ13_re = _σ(E13_re, t.λ, t.μ);
-	σ13_im = _σ(E13_im, t.λ, t.μ)
-	σ12_re = _σ(E12_re, t.λ, t.μ);
-	σ12_im = _σ(E12_im, t.λ, t.μ)
+	σ23_re = _σ(E23_re, t.stress);
+	σ23_im = _σ(E23_im, t.stress)
+	σ13_re = _σ(E13_re, t.stress);
+	σ13_im = _σ(E13_im, t.stress)
+	σ12_re = _σ(E12_re, t.stress);
+	σ12_im = _σ(E12_im, t.stress)
 
 	n_dofs = ndofs_per_cell(t.dh)
 	c = mult * dΩ / 3
@@ -285,7 +334,10 @@ sparse matrices using standard Galerkin FEM.
 	K_rs = ∫ ε(φ_r) ⊡ (λ tr(ε(φ_s)) I + 2μ ε(φ_s)) dΩ
 	M_rs = ∫ ρ φ_r · φ_s dΩ
 """
-function assemble_KM!(K, M, dh, cv, λ::Float64, μ::Float64, ρ::Float64)
+assemble_KM!(K, M, dh, cv, λ::Real, μ::Real, ρ::Real) =
+	assemble_KM!(K, M, dh, cv, IsotropicStress(Float64(λ), Float64(μ)), Float64(ρ))
+
+function assemble_KM!(K, M, dh, cv, stress::AbstractStress, ρ::Float64)
 	n_dpc = ndofs_per_cell(dh)
 	Ke = zeros(n_dpc, n_dpc)
 	Me = zeros(n_dpc, n_dpc)
@@ -303,7 +355,7 @@ function assemble_KM!(K, M, dh, cv, λ::Float64, μ::Float64, ρ::Float64)
 				Nr = shape_value(cv, q, r)
 				for s in 1:n_dpc
 					ε = shape_symmetric_gradient(cv, q, s)
-					σ = λ * tr(ε) * one(ε) + 2μ * ε
+					σ = _σ(ε, stress)
 					Ke[r, s] += (δε ⊡ σ) * dΩ
 					Ns = shape_value(cv, q, s)
 					Me[r, s] += ρ * (Nr ⋅ Ns) * dΩ

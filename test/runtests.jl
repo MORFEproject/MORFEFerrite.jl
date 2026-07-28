@@ -7,5 +7,6 @@ using Test
 @testset "MORFEFerrite" begin
     @testset "StructuralSVK" begin
         include("StructuralSVK/test_structural_svk.jl")
+        include("StructuralSVK/test_anisotropic.jl")
     end
 end

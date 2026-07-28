@@ -42,13 +42,24 @@ Assemble the linear stiffness `K` and mass `M` matrices with the Ferrite SVK bac
 """
 svk_assemble_KM!(args...; kwargs...) = assemble_KM!(args...; kwargs...)
 
+
 include("types.jl")
+
+# Material-dispatching forms: one call site works for isotropic and anisotropic.
+svk_nonlinearity(degree::Integer, dh, cv, free_to_local, n_free,
+	material::Union{SVKMaterial, AnisotropicMaterial}; kwargs...) =
+	FerriteGeometricNonlinearity{Int(degree)}(dh, cv, free_to_local, n_free,
+		stress_model(material); kwargs...)
+
+svk_assemble_KM!(K, M, dh, cv, material::Union{SVKMaterial, AnisotropicMaterial}) =
+	assemble_KM!(K, M, dh, cv, stress_model(material), Float64(material.ρ))
 include("rayleigh_solver.jl")
 include("mechanical_model.jl")
 include("parametrise.jl")
 include("postprocess.jl")
 
-export SVKMaterial, RayleighDamping, HarmonicForcing,
+export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
+	RayleighDamping, HarmonicForcing,
 	AssembledMechanicalModel, InvariantManifoldROM, RayleighEigenSolver,
 	mechanical_model, parametrise, real_dynamics, print_equations, save_rom,
 	svk_nonlinearity, svk_assemble_KM!

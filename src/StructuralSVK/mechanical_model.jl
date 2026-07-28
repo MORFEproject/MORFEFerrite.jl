@@ -9,7 +9,7 @@ Build an `AssembledMechanicalModel` from a Ferrite grid and a pre-computed set
 of constrained node indices (all three displacement components clamped).
 """
 function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
-        material::SVKMaterial,
+        material::Union{SVKMaterial, AnisotropicMaterial},
         damping::RayleighDamping,
         fe_order::Int = 2,
         quad_order::Int = fe_order + 1)
@@ -31,7 +31,7 @@ function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
 
     K_full = allocate_matrix(dh)
     M_full = allocate_matrix(dh)
-    svk_assemble_KM!(K_full, M_full, dh, cv, material.λ, material.μ, material.ρ)
+    svk_assemble_KM!(K_full, M_full, dh, cv, material)
 
     free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
     free_to_local = Dict(d => i for (i, d) in enumerate(free))
@@ -42,7 +42,7 @@ function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
     C = damping.α * M + damping.β * K
 
     factory(deg::Int, max_cols::Int) = svk_nonlinearity(deg, dh, cv,
-        free_to_local, n_free, material.λ, material.μ; max_unique_cols = max_cols)
+        free_to_local, n_free, material; max_unique_cols = max_cols)
 
     return AssembledMechanicalModel(K, M, C, factory, (2, 3), material, damping,
         (n_dofs = n_free, n_dofs_total = ndofs(dh), backend = "Ferrite",
@@ -63,7 +63,7 @@ nonlinearity factory) from a Ferrite grid or a mesh file.
   (1-indexed, i.e. raw COMSOL ID + 1).
 """
 function mechanical_model(grid::Ferrite.Grid;
-        material::SVKMaterial,
+        material::Union{SVKMaterial, AnisotropicMaterial},
         damping::RayleighDamping,
         dirichlet::String,
         fe_order::Int = 2,
@@ -86,7 +86,7 @@ function mechanical_model(grid::Ferrite.Grid;
 
     K_full = allocate_matrix(dh)
     M_full = allocate_matrix(dh)
-    svk_assemble_KM!(K_full, M_full, dh, cv, material.λ, material.μ, material.ρ)
+    svk_assemble_KM!(K_full, M_full, dh, cv, material)
 
     free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
     free_to_local = Dict(d => i for (i, d) in enumerate(free))
@@ -97,7 +97,7 @@ function mechanical_model(grid::Ferrite.Grid;
     C = damping.α * M + damping.β * K
 
     factory(deg::Int, max_cols::Int) = svk_nonlinearity(deg, dh, cv,
-        free_to_local, n_free, material.λ, material.μ; max_unique_cols = max_cols)
+        free_to_local, n_free, material; max_unique_cols = max_cols)
 
     return AssembledMechanicalModel(K, M, C, factory, (2, 3), material, damping,
         (n_dofs = n_free, n_dofs_total = ndofs(dh), backend = "Ferrite",

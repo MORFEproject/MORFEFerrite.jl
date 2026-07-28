@@ -9,4 +9,4 @@ MORFEFerrite = "1d4622c9-196a-4501-8c0e-eb226f4bd3c4"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
-Arpack = "=0.5.3"
+Arpack = "= 0.5.3"
