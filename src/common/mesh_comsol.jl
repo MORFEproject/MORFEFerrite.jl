@@ -100,21 +100,28 @@ const PERM_P18 = [1, 2, 3, 4, 5, 6, 7, 8, 10, 9, 12, 15, 16, 17, 18, 11, 13, 14]
 # -----------------------------------------------------------------------
 
 """
-    load_comsol_grid(path, dirichlet_entity_ids) -> (grid, constrained_nodes)
+    load_comsol_grid(path, dirichlet_entity_ids; scale = 1.0) -> (grid, constrained_nodes)
 
 Read a COMSOL `.mphtxt` file and return the Ferrite `Grid` (P18 quadratic prism
 cells) together with the `Set{Int}` of node indices lying on the Dirichlet
 boundaries. `dirichlet_entity_ids` is the set of COMSOL geometric entity IDs
 (1-indexed, i.e. raw file ID + 1) whose surface elements define the clamped
 region.
+
+`scale` multiplies every node coordinate on load — use it when the mesh and the
+material constants are in different unit systems (e.g. `scale = 1e-3` for a mesh
+drawn in millimetres against SI material data). Scaling the geometry here rather
+than afterwards keeps the DOF numbering and the entity sets untouched.
 """
-function load_comsol_grid(mphtxt_path::AbstractString, dirichlet_entity_ids::Set{Int})
+function load_comsol_grid(mphtxt_path::AbstractString, dirichlet_entity_ids::Set{Int};
+        scale::Real = 1.0)
     (nn, n2c,
         e2nT6, e2gT6, e2nQ9, e2gQ9,
         _, _, e2nP18, _, _, _) = _read_mesh(mphtxt_path)
 
+    σ = Float64(scale)
     nodes = [
-        Ferrite.Node(Ferrite.Vec{3, Float64}((n2c[3i - 2], n2c[3i - 1], n2c[3i])))
+        Ferrite.Node(Ferrite.Vec{3, Float64}((σ * n2c[3i - 2], σ * n2c[3i - 1], σ * n2c[3i])))
         for i in 1:nn
     ]
 

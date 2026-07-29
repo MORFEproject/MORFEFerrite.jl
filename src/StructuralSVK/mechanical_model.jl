@@ -104,9 +104,11 @@ function mechanical_model(grid::Ferrite.Grid;
             fe_order = fe_order, quad_order = quad_order, dirichlet = dirichlet))
 end
 
-function mechanical_model(mesh_path::AbstractString; dirichlet, kwargs...)
+function mechanical_model(mesh_path::AbstractString; dirichlet, scale::Real = 1.0, kwargs...)
     if endswith(mesh_path, ".mphtxt")
-        grid, constrained = load_comsol_grid(mesh_path, dirichlet)
+        # `scale` converts the mesh units to the material's (e.g. 1e-3 for a mm
+        # mesh against SI constants); ignored for Gmsh meshes.
+        grid, constrained = load_comsol_grid(mesh_path, dirichlet; scale = scale)
         return mechanical_model(grid, constrained; kwargs...)
     else
         return mechanical_model(FerriteGmsh.togrid(mesh_path); dirichlet = dirichlet, kwargs...)
