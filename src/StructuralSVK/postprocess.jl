@@ -1,4 +1,24 @@
 """
+	spectrum(m::AssembledMechanicalModel; nev = 10, eigensolver = nothing)
+		-> Eigenproblem
+
+Solve the model's eigenproblem. Pass the result to `parametrise` as
+`eigenproblem = …` to inspect the spectrum first without paying for a second
+solve — and so that inspecting it cannot perturb the ROM.
+"""
+function spectrum(m::AssembledMechanicalModel; nev::Int = 10, eigensolver = nothing)
+	solver = eigensolver === nothing ?
+			 RayleighEigenSolver(nothing, nothing, nev,
+		Float64(m.damping.α), Float64(m.damping.β)) : eigensolver
+	return solver isa StructureModalDampingEigensolver ?
+		   solve_eigenproblem(m.K, m.M, solver; sorter! = (args...) -> nothing) :
+		   solve_eigenproblem(
+		NDOrderModel((m.K, m.C, m.M),
+			Tuple(m.term_factory(d, 1) for d in m.nonlinear_degrees));
+		solver = solver, sorter! = (args...) -> nothing)
+end
+
+"""
 	eigenfrequencies(m::AssembledMechanicalModel; nev = 10, eigensolver = nothing)
 		-> Vector{ComplexF64}
 
@@ -7,19 +27,8 @@ mode `p` occupies entries `2p-1, 2p`, so `abs(λ[2p-1]) / 2π` is its frequency 
 Hz. Use it to inspect the spectrum — and pick `master` — before committing to a
 parametrisation.
 """
-function eigenfrequencies(m::AssembledMechanicalModel; nev::Int = 10,
-	eigensolver = nothing)
-	solver = eigensolver === nothing ?
-			 RayleighEigenSolver(nothing, nothing, nev,
-		Float64(m.damping.α), Float64(m.damping.β)) : eigensolver
-	eigenproblem = solver isa StructureModalDampingEigensolver ?
-				   solve_eigenproblem(m.K, m.M, solver; sorter! = (args...) -> nothing) :
-				   solve_eigenproblem(
-		NDOrderModel((m.K, m.C, m.M),
-			Tuple(m.term_factory(d, 1) for d in m.nonlinear_degrees));
-		solver = solver, sorter! = (args...) -> nothing)
-	return collect(get_eigenpairs(eigenproblem)[1])
-end
+eigenfrequencies(m::AssembledMechanicalModel; kwargs...) =
+	collect(get_eigenpairs(spectrum(m; kwargs...))[1])
 
 """
 	print_mode_table(eigenvalues; master = Int[], io = stdout)

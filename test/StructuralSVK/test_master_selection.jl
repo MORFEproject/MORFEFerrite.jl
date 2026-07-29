@@ -132,6 +132,30 @@ end
     @test dev < 1e-12
 end
 
+@testset "reusing a precomputed spectrum" begin
+    beam = _sel_model()
+
+    ep = SVKm.spectrum(beam; nev = 10)
+    rom_a = SVKm.parametrise(beam; master = [1], order = 3, eigenproblem = ep)
+    rom_b = SVKm.parametrise(beam; master = [1], order = 3, eigenproblem = ep)
+    # Same spectrum in ⇒ bit-identical ROM out.
+    @test rom_a.R.poly.coefficients == rom_b.R.poly.coefficients
+    @test rom_a.info.eig_time_s < 1e-3   # no eigenproblem was solved
+
+    # …and it agrees with letting parametrise solve its own.
+    rom_own = SVKm.parametrise(beam; master = [1], order = 3, nev = 10)
+    dev = maximum(abs.(rom_a.R.poly.coefficients .- rom_own.R.poly.coefficients) ./
+                  max.(abs.(rom_own.R.poly.coefficients), 1e-12))
+    @info "precomputed-vs-internal spectrum max rel dev = $dev"
+    @test dev < 1e-10
+
+    # An eigenproblem too small for the requested masters is rejected (this one
+    # holds 4 physical modes; master = [8] needs 8).
+    small = SVKm.spectrum(beam; nev = 4)
+    @test_throws AssertionError SVKm.parametrise(beam; master = [8], order = 2,
+        eigenproblem = small)
+end
+
 @testset "master argument validation" begin
     beam = _sel_model()
 

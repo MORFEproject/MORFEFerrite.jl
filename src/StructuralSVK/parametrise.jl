@@ -60,7 +60,7 @@ end
 """
 	parametrise(m::AssembledMechanicalModel; master = [1], order,
 				forcing = nothing, resonance_tol = 0.05, resonance_tol_rel = nothing,
-				nev = ..., eigensolver = nothing)
+				eigenproblem = nothing, nev = ..., eigensolver = nothing)
 
 Compute the DPIM invariant-manifold ROM. `master` lists physical mode PAIRS —
 `[1]` is the first conjugate pair (ROM = 2), and the pairs need not be leading
@@ -73,6 +73,9 @@ threshold in absolute units (rad/s); `resonance_tol_rel`, when given, replaces
 it by the per-target relative threshold `resonance_tol_rel * |λⱼ|`, which is the
 physically meaningful criterion when the master modes span decades in frequency
 (e.g. a 2:1 internally resonant pair).
+
+Pass `eigenproblem` (from [`spectrum`](@ref)) to reuse a spectrum you already
+solved — inspecting the modes then costs nothing and cannot perturb the ROM.
 """
 function parametrise(m::AssembledMechanicalModel;
 	master::Vector{Int} = [1],
@@ -80,12 +83,13 @@ function parametrise(m::AssembledMechanicalModel;
 	forcing::Union{Nothing, HarmonicForcing} = nothing,
 	resonance_tol::Real = 0.05,
 	resonance_tol_rel::Union{Nothing, Real} = nothing,
+	eigenproblem = nothing,
 	nev::Int = max(10,
 		2 * max(maximum(master), forcing === nothing ? 0 : forcing.mode) + 4),
 	eigensolver = nothing)
 	@assert all(>(0), master)&&allunique(master) "master must list distinct positive mode pairs; got master = $master"
 	@assert issorted(master) "master must be sorted (the ROM coordinate order follows it); got master = $master"
-	@assert nev>=maximum(master) "nev = $nev is too small for master = $master: at least $(maximum(master)) physical modes must be computed"
+	@assert eigenproblem !== nothing||nev >= maximum(master) "nev = $nev is too small for master = $master: at least $(maximum(master)) physical modes must be computed"
 	if forcing !== nothing
 		@assert forcing.mode in master "forcing.mode = $(forcing.mode) must be a master mode pair (master = $master): the near-resonant reduction requires the forced mode on the manifold"
 	end
@@ -99,19 +103,15 @@ function parametrise(m::AssembledMechanicalModel;
 
 	# ── Eigenproblem (autonomous operator; the forcing does not enter) ──────
 	eig_model = NDOrderModel((m.K, m.C, m.M), terms)
-	solver = eigensolver === nothing ?
-			 RayleighEigenSolver(
-		nothing, nothing, nev, Float64(m.damping.α), Float64(m.damping.β)) :
-			 eigensolver
-	t_eig = @elapsed eigenproblem =
-		solver isa StructureModalDampingEigensolver ?
-		solve_eigenproblem(m.K, m.M, solver; sorter! = (args...) -> nothing) :
-		solve_eigenproblem(eig_model; solver = solver, sorter! = (args...) -> nothing)
-	(eigenvalues, Y, X) = get_eigenpairs(eigenproblem)
+	t_eig = @elapsed ep = eigenproblem === nothing ?
+							  spectrum(m; nev = nev, eigensolver = eigensolver) :
+							  eigenproblem
+	(eigenvalues, Y, X) = get_eigenpairs(ep)
+	@assert length(eigenvalues)>=2 * maximum(master) "the eigenproblem holds $(length(eigenvalues) ÷ 2) physical modes, too few for master = $master"
 
 	# Eigenvalues come in conjugate pairs: physical mode p occupies columns 2p-1, 2p.
 	master_indices = reduce(vcat, [[2p - 1, 2p] for p in master])
-	select_master_modes_by_hand(eigenproblem,
+	select_master_modes_by_hand(ep,
 		[i in master_indices for i in 1:length(eigenvalues)])
 	master_eigenvalues = SVector{ROM, ComplexF64}(eigenvalues[master_indices])
 	master_modes = Y[:, 1, master_indices]
@@ -125,7 +125,7 @@ function parametrise(m::AssembledMechanicalModel;
 	end
 	# Lower-order left eigenvector blocks (must be scale-consistent with the
 	# physical slice above — both come from the same Eigenproblem storage).
-	left_modes_derivatives = eigenproblem.left_eigenmodes_orders[
+	left_modes_derivatives = ep.left_eigenmodes_orders[
 		:, 1:(ORD_model-1), master_indices]
 
 	# ── Model with forcing (shape mode == frequency mode) ───────────────────

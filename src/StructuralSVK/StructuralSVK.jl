@@ -61,7 +61,7 @@ include("postprocess.jl")
 export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
 	RayleighDamping, HarmonicForcing,
 	AssembledMechanicalModel, InvariantManifoldROM, RayleighEigenSolver,
-	mechanical_model, parametrise, eigenfrequencies, print_mode_table,
+	mechanical_model, parametrise, spectrum, eigenfrequencies, print_mode_table,
 	resonances, print_resonances, real_dynamics, print_equations, save_rom,
 	svk_nonlinearity, svk_assemble_KM!
 
