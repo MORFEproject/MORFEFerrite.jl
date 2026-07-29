@@ -1,20 +1,91 @@
 """
-	parametrise(m::AssembledMechanicalModel; master = [1], order,
-				forcing = nothing, resonance_tol = 0.05, nev = ..., eigensolver = nothing)
+	resonances(eigenvalues, master, order; external_eigenvalues = ComplexF64[],
+			   resonance_tol = 0.05, resonance_tol_rel = nothing, mset = nothing)
+		-> (mset, resonance_set, master_eigenvalues)
 
-Compute the DPIM invariant-manifold ROM. `master` lists physical mode PAIRS
-(`[1]` → first conjugate pair, ROM = 2). With `forcing::HarmonicForcing`,
-two external states with eigenvalues ±iΩ are appended (N_EXT = 2).
+Build the monomial set and the complex-normal-form `ResonanceSet` that a
+`parametrise` call with the same arguments would use. Call it on the output of
+[`eigenfrequencies`](@ref) to preview — before paying for the cohomological
+solve — which monomials will be kept in the reduced dynamics.
+
+`resonance_tol` is the absolute detuning threshold (rad/s); `resonance_tol_rel`,
+when given, replaces it by the per-target relative threshold
+`resonance_tol_rel * |λⱼ|`.
+"""
+function resonances(eigenvalues::AbstractVector, master::Vector{Int}, order::Int;
+	external_eigenvalues::Vector{ComplexF64} = ComplexF64[],
+	resonance_tol::Real = 0.05,
+	resonance_tol_rel::Union{Nothing, Real} = nothing,
+	mset = nothing)
+	master_indices = reduce(vcat, [[2p - 1, 2p] for p in master])
+	λm = ComplexF64[eigenvalues[i] for i in master_indices]
+	ROM = length(λm)
+	NVAR = ROM + length(external_eigenvalues)
+	ms = mset === nothing ? all_multiindices_up_to(NVAR, order; min_degree = 1) : mset
+	# Per-monomial, per-target threshold when a relative tolerance is requested:
+	# tol[k][j] = resonance_tol_rel * |λⱼ|, so detuning is measured on each
+	# target's own frequency scale.
+	tol = resonance_tol_rel === nothing ? Float64(resonance_tol) :
+		  [[Float64(resonance_tol_rel) * abs(λm[j]) for j in 1:ROM] for _ in 1:length(ms)]
+	rset = resonance_set_from_complex_normal_form_style(ms, λm, tol;
+		external_eigenvalues = external_eigenvalues)
+	return ms, rset, λm
+end
+
+"""
+	print_resonances(mset, resonance_set, master_eigenvalues; io = stdout)
+
+List, per reduced-dynamics target, the monomials flagged as resonant — the terms
+that survive in the reduced dynamics `R`.
+"""
+function print_resonances(mset, resonance_set, master_eigenvalues::Vector{ComplexF64};
+	io::IO = stdout)
+	n_int = n_internal(resonance_set)
+	n_out = resonance_set.outer_resonances === nothing ? 0 :
+			size(resonance_set.outer_resonances, 1)
+	n_flag = count(resonance_set.inner_resonances) +
+			 (n_out > 0 ? count(resonance_set.outer_resonances) : 0)
+	@printf(io, "  Monomials: %d,  targets: %d,  resonant flags: %d / %d\n",
+		length(mset), n_int + n_out, n_flag, (n_int + n_out) * length(mset))
+	for t in 1:(n_int + n_out)
+		cols = resonant_multiindices(resonance_set, t)
+		λt = t ≤ n_int ? master_eigenvalues[t] : ComplexF64(0)
+		@printf(io, "\n    Target %d (λ = %+.6e %+.6e im): %d resonant monomials\n",
+			t, real(λt), imag(λt), length(cols))
+		println(io, "      ", join(["$(Tuple(mset.exponents[k]))" for k in cols], "  "))
+	end
+	return nothing
+end
+
+"""
+	parametrise(m::AssembledMechanicalModel; master = [1], order,
+				forcing = nothing, resonance_tol = 0.05, resonance_tol_rel = nothing,
+				nev = ..., eigensolver = nothing)
+
+Compute the DPIM invariant-manifold ROM. `master` lists physical mode PAIRS —
+`[1]` is the first conjugate pair (ROM = 2), and the pairs need not be leading
+or contiguous (`master = [2, 5]` reduces onto the 2nd and 5th physical modes).
+With `forcing::HarmonicForcing`, two external states with eigenvalues ±iΩ are
+appended (N_EXT = 2).
+
+Resonances are detected with `|λⱼ - ⟨λ, α⟩| < tol`. `resonance_tol` sets that
+threshold in absolute units (rad/s); `resonance_tol_rel`, when given, replaces
+it by the per-target relative threshold `resonance_tol_rel * |λⱼ|`, which is the
+physically meaningful criterion when the master modes span decades in frequency
+(e.g. a 2:1 internally resonant pair).
 """
 function parametrise(m::AssembledMechanicalModel;
 	master::Vector{Int} = [1],
 	order::Int,
 	forcing::Union{Nothing, HarmonicForcing} = nothing,
 	resonance_tol::Real = 0.05,
+	resonance_tol_rel::Union{Nothing, Real} = nothing,
 	nev::Int = max(10,
 		2 * max(maximum(master), forcing === nothing ? 0 : forcing.mode) + 4),
 	eigensolver = nothing)
-	@assert master == collect(1:length(master)) "only contiguous leading mode pairs are supported (master = [1], [1, 2], …); got master = $master"
+	@assert all(>(0), master)&&allunique(master) "master must list distinct positive mode pairs; got master = $master"
+	@assert issorted(master) "master must be sorted (the ROM coordinate order follows it); got master = $master"
+	@assert nev>=maximum(master) "nev = $nev is too small for master = $master: at least $(maximum(master)) physical modes must be computed"
 	if forcing !== nothing
 		@assert forcing.mode in master "forcing.mode = $(forcing.mode) must be a master mode pair (master = $master): the near-resonant reduction requires the forced mode on the manifold"
 	end
@@ -38,20 +109,24 @@ function parametrise(m::AssembledMechanicalModel;
 		solve_eigenproblem(eig_model; solver = solver, sorter! = (args...) -> nothing)
 	(eigenvalues, Y, X) = get_eigenpairs(eigenproblem)
 
-	select_master_modes_by_sorting(eigenproblem, ROM)
-	master_eigenvalues = SVector{ROM, ComplexF64}(eigenvalues[1:ROM])
-	master_modes = Y[:, 1, 1:ROM]
-	left_eigenmodes = X[:, 1:ROM]
+	# Eigenvalues come in conjugate pairs: physical mode p occupies columns 2p-1, 2p.
+	master_indices = reduce(vcat, [[2p - 1, 2p] for p in master])
+	select_master_modes_by_hand(eigenproblem,
+		[i in master_indices for i in 1:length(eigenvalues)])
+	master_eigenvalues = SVector{ROM, ComplexF64}(eigenvalues[master_indices])
+	master_modes = Y[:, 1, master_indices]
+	left_eigenmodes = X[:, master_indices]
 
 	ORD_model = length(eig_model.linear_terms) - 1   # = 2
 	FOM = m.info.n_dofs
 	master_modes_derivatives = zeros(ComplexF64, FOM, ORD_model - 1, ROM)
-	for r in 1:ROM, k in 1:(ORD_model-1)
-		master_modes_derivatives[:, k, r] .= Y[:, k+1, r]
+	for (r, idx) in enumerate(master_indices), k in 1:(ORD_model-1)
+		master_modes_derivatives[:, k, r] .= Y[:, k+1, idx]
 	end
 	# Lower-order left eigenvector blocks (must be scale-consistent with the
 	# physical slice above — both come from the same Eigenproblem storage).
-	left_modes_derivatives = eigenproblem.left_eigenmodes_orders[:, 1:(ORD_model-1), 1:ROM]
+	left_modes_derivatives = eigenproblem.left_eigenmodes_orders[
+		:, 1:(ORD_model-1), master_indices]
 
 	# ── Model with forcing (shape mode == frequency mode) ───────────────────
 	Ω = nothing
@@ -69,9 +144,9 @@ function parametrise(m::AssembledMechanicalModel;
 			ExternalSystem(Tuple(ext_eigs)))
 	end
 
-	resonance_set = resonance_set_from_complex_normal_form_style(
-		mset, Vector{ComplexF64}(master_eigenvalues), Float64(resonance_tol);
-		external_eigenvalues = ext_eigs)
+	_, resonance_set, _ = resonances(eigenvalues, master, order;
+		external_eigenvalues = ext_eigs, resonance_tol = resonance_tol,
+		resonance_tol_rel = resonance_tol_rel, mset = mset)
 
 	conjugate_permutation = reduce(vcat, [[2p, 2p - 1] for p in 1:length(master)])
 	for k in 1:(N_EXT ÷ 2)

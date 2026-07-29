@@ -150,7 +150,9 @@ end
         material = SVK.SVKMaterial(E = _E, ν = _ν, ρ = _ρ),
         damping = SVK.RayleighDamping(α = _α, β = _β),
         dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
-    @test_throws AssertionError SVK.parametrise(beam; master = [2], order = 3)
+    # Non-leading master pairs are supported (see test_master_selection.jl); the
+    # rejected cases are malformed lists and a forcing outside the master set.
+    @test_throws AssertionError SVK.parametrise(beam; master = [2, 1], order = 3)
     @test_throws AssertionError SVK.parametrise(beam; master = [1], order = 3,
         forcing = SVK.HarmonicForcing(mode = 2, amplitude = 0.1))
 end

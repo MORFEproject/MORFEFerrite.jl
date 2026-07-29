@@ -47,7 +47,8 @@ function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
     return AssembledMechanicalModel(K, M, C, factory, (2, 3), material, damping,
         (n_dofs = n_free, n_dofs_total = ndofs(dh), backend = "Ferrite",
             fe_order = fe_order, quad_order = quad_order,
-            dirichlet = "$(length(constrained_nodes)) constrained nodes"))
+            dirichlet = "$(length(constrained_nodes)) constrained nodes",
+            dh = dh, cellvalues = cv, free_to_local = free_to_local))
 end
 
 """
@@ -101,7 +102,8 @@ function mechanical_model(grid::Ferrite.Grid;
 
     return AssembledMechanicalModel(K, M, C, factory, (2, 3), material, damping,
         (n_dofs = n_free, n_dofs_total = ndofs(dh), backend = "Ferrite",
-            fe_order = fe_order, quad_order = quad_order, dirichlet = dirichlet))
+            fe_order = fe_order, quad_order = quad_order, dirichlet = dirichlet,
+            dh = dh, cellvalues = cv, free_to_local = free_to_local))
 end
 
 function mechanical_model(mesh_path::AbstractString; dirichlet, scale::Real = 1.0, kwargs...)
