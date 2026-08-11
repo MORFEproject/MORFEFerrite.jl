@@ -34,7 +34,13 @@ RayleighDamping(; α, β) = RayleighDamping(promote(α, β)...)
 
 Harmonic load `f(t) = amplitude · M·ϕ_mode · cos(Ω t)`: shaped like mode
 `mode`, oscillating at that same mode's natural frequency unless `Ω` is given.
-`mode` must be one of the `master` mode pairs passed to `parametrise`.
+
+`parametrise` accepts either one of these or a vector of them (multi-harmonic
+excitation); each element adds its own pair of external states with eigenvalues
+±iΩ, so `N_EXT = 2 · length(forcing)`. `mode` need not be a `master` pair — it
+only supplies the load shape — but `parametrise` warns if Ω is near-resonant
+with a mode left off the manifold, which makes that direction's solve
+ill-conditioned however the load is shaped.
 """
 struct HarmonicForcing{T}
     mode::Int
@@ -49,7 +55,7 @@ Assembled second-order mechanical model `M ü + C u̇ + K u = f_nl(u) (+ forcing
 restricted to free DOFs, with a lazy factory for the FEM nonlinear terms:
 `term_factory(degree, max_cols)` → `FEMMultilinearMap`.
 """
-struct AssembledMechanicalModel{TK, TM, TC, F, MAT, DMP}
+struct AssembledMechanicalModel{TK, TM, TC, F, MAT, DMP} <: AbstractAssembledModel
     K::TK
     M::TM
     C::TC
@@ -73,7 +79,8 @@ end
 """
 Invariant-manifold ROM returned by `parametrise`. Fields: `W` (parametrisation),
 `R` (reduced dynamics), `eigenvalues`, `master` (mode pairs), `order`,
-`forcing` (`nothing` or `HarmonicForcing`), `info` (NamedTuple).
+`forcing` (a `Vector{<:HarmonicForcing}`, empty when autonomous), `info`
+(NamedTuple, whose `Ω` is the matching vector of forcing frequencies).
 """
 struct InvariantManifoldROM{TW, TR, T, FRC}
     W::TW
@@ -93,11 +100,14 @@ function Base.show(io::IO, ::MIME"text/plain", rom::InvariantManifoldROM)
         λ = rom.eigenvalues[2p - 1]
         println(io, "    pair $p: λ = $λ   (f = $(abs(λ) / 2π))")
     end
-    if rom.forcing === nothing
+    if isempty(rom.forcing)
         println(io, "  forcing      : none (autonomous)")
     else
-        println(io,
-            "  forcing      : mode $(rom.forcing.mode), amplitude $(rom.forcing.amplitude), Ω = $(rom.info.Ω)")
+        for (k, (f, Ω)) in enumerate(zip(rom.forcing, rom.info.Ω))
+            label = k == 1 ? "  forcing      : " : "                 "
+            println(io,
+                "$label[$k] mode $(f.mode), amplitude $(f.amplitude), Ω = $Ω")
+        end
     end
     println(io, "  order        : $(rom.order)   ($(rom.info.n_monomials) monomials)")
     print(io, "  solve time   : $(round(rom.info.solve_time_s; digits = 2)) s")

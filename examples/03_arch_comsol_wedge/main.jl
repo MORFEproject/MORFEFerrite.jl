@@ -45,10 +45,11 @@ MATERIAL = SVK.SVKMaterial(E = 160e3, ν = 0.22, ρ = 2.32e-3)
 DAMPING = SVK.RayleighDamping(α = 0.0, β = 0.0)
 DIRICHLET = Set([1, 11])       # COMSOL entity IDs of the arch feet (raw IDs 0 and 10)
 FE_ORDER = 2
-QUAD_ORDER = 4
+QUAD_ORDER = 4 # should read quadrature order instead; "QUAD" also means quadratic
 MASTER = [1]                   # master conjugate mode pairs
 ORDER = FAST ? 3 : 5           # parametrisation order
-FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.03)
+FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.03);
+# a vector of them gives multi-harmonic forcing (N_EXT = 2 per forcing)
 
 # ── PIPELINE — generic; no need to edit ──────────────────────────────────────
 # ## Assemble the mechanical model (K, M, C on free DOFs + SVK nonlinearity)

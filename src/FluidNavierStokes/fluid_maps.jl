@@ -218,9 +218,15 @@ K_visc_free is the viscosity stiffness restricted to free DOFs, pre-scaled by
 Its pressure rows and columns are zero, so the multiplication correctly
 targets only velocity DOFs in both input and output.
 
-MORFE passes the external argument as a unit SVector{1,Int}([1]) — the actual η′
-scaling is handled by the polynomial factorisation in the cohomological solver.
-Hence f!(accum, s, r_ext) adds r_ext[1] · K_visc · s = K_visc · s to accum.
+MORFE passes the external argument as a basis direction — the unit SVector{1,Int}([1])
+here, since this external system is diagonal.  The actual η′ scaling is handled by the
+polynomial factorisation in the cohomological solver.  Hence f!(accum, s, r_ext) adds
+r_ext[1] · K_visc · s = K_visc · s to accum.
+
+Do not assume the argument is integer-valued: when an external system's linear matrix is
+not upper triangular, `ExternalSystem` re-bases it and MORFE then passes the columns of the
+change of basis, which are complex in general.  The `eltype(accum)` conversion below is
+what keeps this term correct in that case.
 """
 function make_param_coupling(K_visc_free::SparseMatrixCSC)
     K = K_visc_free   # close over the matrix
@@ -248,9 +254,14 @@ the FULL base-flow vector, whose prescribed inlet DOFs carry the Poiseuille
 profile.  It determines the external direction Φ_ext via the cohomological
 equation for monomial (0,0,1).
 
-MORFE passes the external argument as a unit SVector{1,Int}([1]), so
-f!(accum, r_ext) adds r_ext[1] · h₀_vec to accum (η′ scaling is handled
-by the polynomial factorisation framework).
+MORFE passes the external argument as a basis direction — the unit SVector{1,Int}([1])
+here, since this external system is diagonal — so f!(accum, r_ext) adds r_ext[1] · h₀_vec
+to accum (η′ scaling is handled by the polynomial factorisation framework).
+
+Do not assume the argument is integer-valued: a re-based external system (one whose linear
+matrix was not upper triangular) is passed the columns of its change of basis, which are
+complex in general.  The `eltype(accum)` conversion below is what keeps this term correct
+in that case.
 """
 function make_base_forcing(h₀_vec_free::AbstractVector)
     h₀ = ComplexF64.(h₀_vec_free)   # close over a complex copy

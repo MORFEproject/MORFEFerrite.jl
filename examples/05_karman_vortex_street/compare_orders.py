@@ -134,11 +134,12 @@ def main():
         if fom_rows:
             fr = np.array([(re, lift, tke) for re, lift, tke, conv in fom_rows if conv])
             if fr.size:
-                plt.plot(fr[:, 0], fr[:, 1] if col == 7 else fr[:, 2], marker="*", ms=13, lw=0,
-                         color="k", label="FOM")
+                plt.plot(fr[:, 0], fr[:, 1] if col == 7 else fr[:, 2], marker="o", ms=6, lw=0,
+                            markeredgewidth=2, markeredgecolor='k',
+                            markerfacecolor='None', label="FOM")
             
-        plt.plot([0, arr[0, 2]],[0.0,0.0], color="k", ls="-", marker="o", ms=7, lw=2)
-        plt.plot([arr[0, 2], 100],[0.0,0.0], color="k", ls="--", lw=2)
+        plt.plot([0, 48.9844],[0.0,0.0], color="k", ls="-", marker="o", ms=7, lw=2)
+        plt.plot([48.9844, 100],[0.0,0.0], color="k", ls="--", lw=2)
 
         if col == 6: plt.ylim([-0.001, 0.02])
         if col == 7: plt.ylim([-0.001, 0.016])
@@ -150,8 +151,8 @@ def main():
         #plt.grid(alpha=0.3)
         #plt.tight_layout()
         plt.savefig(out / fname, dpi=200)
-        plt.close(plt.gcf())
-        #plt.show()
+        #plt.close(plt.gcf())
+        plt.show()
         print(f"wrote {out / fname}")
     print(f"wrote {out / 'comparison.csv'}  ({len(all_rows)} rows)")
 

@@ -35,7 +35,8 @@ function assemble_parametric_K_M!(K_arr::Vector, M_arr::Vector,
 
 	for cell in CellIterator(dh)
 		for m in 1:L
-			fill!(ke[m], 0.0); fill!(me[m], 0.0)
+			fill!(ke[m], 0.0);
+			fill!(me[m], 0.0)
 		end
 		reinit!(cv, cell)
 		coords = getcoordinates(cell)
@@ -72,7 +73,7 @@ function assemble_parametric_K_M!(K_arr::Vector, M_arr::Vector,
 	return nothing
 end
 
-# --- correction builders (skip the base α = 0, kept as NDOrderModel terms) ---
+# --- correction builders (skip the base α = 0, kept as NthOrderModel terms) ---
 """
 	build_K_corrections(K_arr, basis) -> Vector{MultilinearMap}
 
@@ -84,7 +85,8 @@ function build_K_corrections(K_arr::Vector, basis::ThetaBasis)
 		all(iszero, α) && continue
 		Kk = K_arr[αidx]
 		nnz(Kk) > 0 || continue
-		m = sum(α); comp = _expand_multiindex(α)
+		m = sum(α);
+		comp = _expand_multiindex(α)
 		push!(corr, MultilinearMap(Base.invokelatest(_ps_linK, Val(m), comp, Kk), (1, 0, 0), m))
 	end
 	return corr
@@ -107,7 +109,8 @@ function build_C_corrections(K_arr::Vector, M_arr::Vector,
 		end
 		Ck === nothing && continue
 		nnz(Ck) > 0 || continue
-		m = sum(α); comp = _expand_multiindex(α)
+		m = sum(α);
+		comp = _expand_multiindex(α)
 		push!(corr, MultilinearMap(Base.invokelatest(_ps_linC, Val(m), comp, Ck), (0, 1, 0), m))
 	end
 	return corr
@@ -124,7 +127,8 @@ function build_M_corrections(M_arr::Vector, basis::ThetaBasis)
 		all(iszero, α) && continue
 		Mk = M_arr[αidx]
 		nnz(Mk) > 0 || continue
-		m = sum(α); comp = _expand_multiindex(α)
+		m = sum(α);
+		comp = _expand_multiindex(α)
 		push!(corr, MultilinearMap(Base.invokelatest(_ps_linM, Val(m), comp, Mk), (0, 0, 1), m))
 	end
 	return corr

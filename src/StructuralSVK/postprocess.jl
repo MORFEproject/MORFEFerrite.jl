@@ -1,6 +1,6 @@
 """
 	spectrum(m::AssembledMechanicalModel; nev = 10, eigensolver = nothing)
-		-> Eigenproblem
+		-> Spectrum
 
 Solve the model's eigenproblem. Pass the result to `parametrise` as
 `eigenproblem = …` to inspect the spectrum first without paying for a second
@@ -8,12 +8,12 @@ solve — and so that inspecting it cannot perturb the ROM.
 """
 function spectrum(m::AssembledMechanicalModel; nev::Int = 10, eigensolver = nothing)
 	solver = eigensolver === nothing ?
-			 RayleighEigenSolver(nothing, nothing, nev,
+			 RayleighEigensolver(nothing, nothing, nev,
 		Float64(m.damping.α), Float64(m.damping.β)) : eigensolver
 	return solver isa StructureModalDampingEigensolver ?
-		   solve_eigenproblem(m.K, m.M, solver; sorter! = (args...) -> nothing) :
-		   solve_eigenproblem(
-		NDOrderModel((m.K, m.C, m.M),
+		   spectrum(m.K, m.M, solver; sorter! = (args...) -> nothing) :
+		   spectrum(
+		NthOrderModel((m.K, m.C, m.M),
 			Tuple(m.term_factory(d, 1) for d in m.nonlinear_degrees));
 		solver = solver, sorter! = (args...) -> nothing)
 end
@@ -28,7 +28,7 @@ Hz. Use it to inspect the spectrum — and pick `master` — before committing t
 parametrisation.
 """
 eigenfrequencies(m::AssembledMechanicalModel; kwargs...) =
-	collect(get_eigenpairs(spectrum(m; kwargs...))[1])
+	collect((spectrum(m; kwargs...)).eigenvalues)
 
 """
 	print_mode_table(eigenvalues; master = Int[], io = stdout)
@@ -59,28 +59,52 @@ end
 
 Realified master equation ż₁ in the real pair z₁ = x₁ + i y₁:
 Re(c) is the ẋ₁-equation, Im(c) the ẏ₁-equation (the imaginary parts carry
-the frequency content; do not discard them). External (forcing) states also
-come in conjugate ±iΩ pairs, so the same pairwise conjugation map applies.
+the frequency content; do not discard them). Every forcing's external states
+also come in a conjugate ±iΩ pair, so the same pairwise conjugation map applies
+regardless of how many forcings there are.
+
+The adjacent-pair map below is valid exactly because `parametrise` builds `N_EXT =
+2 · length(forcing)` external states as ±iΩ pairs from a diagonal `ExternalSystem`, so no
+change of external coordinates ever takes place. The assertion pins that invariant: a ROM
+with an odd `N_EXT` (a self-conjugate real external variable) or a re-based external system
+needs its permutation derived with `MORFE.full_conjugate_permutation` instead, which this
+signature has no access to since `InvariantManifoldROM` does not retain the model.
 """
 function real_dynamics(rom::InvariantManifoldROM)
-	NVAR = 2 * length(rom.master) + rom.info.N_EXT
+	N_EXT = rom.info.N_EXT
+	@assert iseven(N_EXT) """
+	real_dynamics assumes external states come in adjacent conjugate ±iΩ pairs, but this ROM
+	has N_EXT = $(N_EXT), which is odd. Derive the conjugation map from the model's
+	ExternalSystem with `MORFE.full_conjugate_permutation(master_block, external_system)`.
+	"""
+	NVAR = 2 * length(rom.master) + N_EXT
 	conj_map = [isodd(i) ? i + 1 : i - 1 for i in 1:NVAR]
 	return realify(extract_component(rom.R.poly, 1), conj_map)
 end
 
+_sub(n::Integer) = join('₀' + d for d in reverse(digits(n)))
+
 """
 	print_equations(rom; tol = 1e-12, io = stdout)
 
-Print the realified ż₁ monomial table. In the forced case the trailing two
-exponents belong to the external states (e^{+iΩt}, e^{-iΩt}).
+Print the realified ż₁ monomial table. `realify` groups the variables as
+`(x₁…xₙ, y₁…yₙ)` — all real parts, then all imaginary parts — over
+`n = length(master) + N_EXT÷2` conjugate pairs. Pairs `1 … length(master)` are
+the master coordinates; the rest are the forcing pairs, in the order the
+forcings were passed to `parametrise`.
 """
 function print_equations(rom::InvariantManifoldROM; tol = 1e-12, io = stdout)
 	Rr = real_dynamics(rom)
-	header = rom.info.N_EXT == 0 ?
-			 "(x₁,y₁) exponents : ẋ₁-coeff, ẏ₁-coeff" :
-			 "(x₁,y₁,ext₊,ext₋) exponents : ẋ₁-coeff, ẏ₁-coeff"
+	n_pairs = length(rom.master) + rom.info.N_EXT ÷ 2
+	header = "(" * join(["x" * _sub(i) for i in 1:n_pairs], ",") * "," *
+			 join(["y" * _sub(i) for i in 1:n_pairs], ",") *
+			 ") exponents : ẋ₁-coeff, ẏ₁-coeff"
 	println(io, "Reduced dynamics ż₁ = ẋ₁ + i·ẏ₁ in real variables:")
 	println(io, "  " * header)
+	if rom.info.N_EXT > 0
+		println(io,
+			"  (pairs $(length(rom.master) + 1)…$n_pairs are the forcing states)")
+	end
 	for (m, mi) in enumerate(Rr.multiindex_set.exponents)
 		c = Rr.coefficients[m]
 		abs(c) > tol && println(io,
@@ -106,8 +130,10 @@ function save_rom(rom::InvariantManifoldROM, dir::AbstractString)
 			vcat, [[2p - 1, 2p] for p in rom.master])],
 		"parametrisation_order" => rom.order,
 		"n_monomials" => rom.info.n_monomials,
-		"forcing" => rom.forcing === nothing ? "none" :
-					 "mode=$(rom.forcing.mode) amplitude=$(rom.forcing.amplitude) Omega=$(rom.info.Ω)",
+		"n_forcings" => length(rom.forcing),
+		"forcing" => isempty(rom.forcing) ? "none" :
+					 join(["mode=$(f.mode) amplitude=$(f.amplitude) Omega=$Ω"
+						   for (f, Ω) in zip(rom.forcing, rom.info.Ω)], "; "),
 		"eigenproblem_time_s" => rom.info.eig_time_s,
 		"cohomological_solve_time_s" => rom.info.solve_time_s,
 	]

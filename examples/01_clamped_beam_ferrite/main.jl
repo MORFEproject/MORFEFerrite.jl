@@ -44,16 +44,14 @@ FAST = get(ENV, "MORFE_FAST", "0") == "1"
 
 MESH = joinpath(@__DIR__, "clamped_clamped_beam.msh")   # Gmsh .msh or COMSOL .mphtxt
 MATERIAL = SVK.SVKMaterial(E = 160e3, ν = 0.22, ρ = 2.32e-3)
-DAMPING = SVK.RayleighDamping(
-	α = 0.5370828278264171 / 100.0,
-	β = 1.0 / (0.5370828278264171 * 100.0),
-)
+DAMPING = SVK.RayleighDamping(α = 0.0, β = 0.0)
 DIRICHLET = "Dirichlet"        # Gmsh facetset name (COMSOL: Set of entity IDs)
 FE_ORDER = 2
 QUAD_ORDER = 3
 MASTER = [1]                   # master conjugate mode pairs
 ORDER = FAST ? 3 : 9           # parametrisation order
-FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.03)
+FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.03);
+# a vector of them gives multi-harmonic forcing (N_EXT = 2 per forcing)
 
 # ── PIPELINE — generic; no need to edit ──────────────────────────────────────
 # ## Assemble the mechanical model (K, M, C on free DOFs + SVK nonlinearity)

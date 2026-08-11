@@ -27,7 +27,9 @@ iso_crystal(; rotation = nothing) = SVK.CubicCrystal(
 	c11 = _λ + 2_μ, c12 = _λ, c44 = _μ, ρ = _ρ, rotation = rotation)
 
 function _test_grid()
-	grid = generate_grid(Hexahedron, (3, 1, 1), Vec(0.0, 0.0, 0.0), Vec(100.0, 5.0, 5.0))
+	# Rectangular section: a square one makes the bending pairs degenerate (see
+	# the note on `_test_grid` in test_structural_svk.jl).
+	grid = generate_grid(Hexahedron, (3, 1, 1), Vec(0.0, 0.0, 0.0), Vec(100.0, 5.0, 3.0))
 	addfacetset!(grid, "Dirichlet", x -> abs(x[1]) < 1e-8 || abs(x[1] - 100.0) < 1e-8)
 	return grid
 end

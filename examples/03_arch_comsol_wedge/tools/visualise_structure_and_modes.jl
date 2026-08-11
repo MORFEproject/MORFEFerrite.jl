@@ -95,11 +95,11 @@ M = M_full[free, free]
 
 # ── Eigenproblem ──────────────────────────────────────────────────────────────
 println("\n§3  Eigenproblem ($(N_MODES) modes) …")
-t_eig = @timed solve_eigenproblem(K, M,
+t_eig = @timed spectrum(K, M,
 	StructureModalDampingEigensolver(N_MODES, 0.0, 0.0);
 	sorter! = (args...) -> nothing)
 eigenproblem = t_eig.value
-eigenvalues, Y, X = get_eigenpairs(eigenproblem)
+eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes, eigenproblem.left_eigenmodes
 
 println("  Eigenfrequencies (Hz):")
 for i in 1:2:length(eigenvalues)

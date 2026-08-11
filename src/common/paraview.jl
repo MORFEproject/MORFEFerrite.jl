@@ -33,7 +33,7 @@ write_paraview_mesh(args...; kwargs...) = error("write_paraview_mesh $_NEED_VTK"
 Write the first `n_modes` eigenmodes to `outdir/mode_kk.vtu` and collect them
 in a PVD file `outdir/modes.pvd` (one "time" frame per mode).
 
-- `Y`: position eigenvectors, shape `(n_free, ORD, n_eig)` from `solve_eigenproblem`.
+- `Y`: position eigenvectors, shape `(n_free, ORD, n_eig)` from `spectrum`.
 - `free`: sorted vector of free (unconstrained) global DOF indices.
 """
 write_paraview_modes(args...; kwargs...) = error("write_paraview_modes $_NEED_VTK")

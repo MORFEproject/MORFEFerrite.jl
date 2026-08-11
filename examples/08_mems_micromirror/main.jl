@@ -50,7 +50,8 @@ FE_ORDER = 2
 QUAD_ORDER = 3
 MASTER = [1]                   # master conjugate mode pairs
 ORDER = FAST ? 3 : 5           # parametrisation order
-FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.03)
+FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.03);
+# a vector of them gives multi-harmonic forcing (N_EXT = 2 per forcing)
 
 # ── PIPELINE — generic; no need to edit ──────────────────────────────────────
 # ## Assemble the mechanical model (K, M, C on free DOFs + SVK nonlinearity)

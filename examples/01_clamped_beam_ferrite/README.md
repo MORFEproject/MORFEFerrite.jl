@@ -41,7 +41,20 @@ rom = SVK.parametrise(beam; master = [1], order = 9,
     forcing = SVK.HarmonicForcing(mode = 1, amplitude = 0.03))
 ```
 
-The forced mode must be a master mode (near-resonant reduction).
+Pass a **vector** for multi-harmonic excitation, `f(t) = Σₖ aₖ · M·ϕ_{pₖ} · cos(Ωₖ t)`.
+Each forcing gets its own ±iΩₖ pair, so `N_EXT = 2 · length(forcing)` and forcing `k`
+occupies reduced coordinates `ROM+2k-1`, `ROM+2k`:
+
+```julia
+rom = SVK.parametrise(beam; master = [1], order = 9,
+    forcing = [SVK.HarmonicForcing(mode = 1, amplitude = 0.03),
+               SVK.HarmonicForcing(mode = 1, amplitude = 0.01, Ω = 3.0 * ω₁)])
+```
+
+The forcing mode only supplies the load shape and need not be a master mode, but
+`parametrise` warns when a forcing is near-resonant with a mode left off the manifold
+*and* actually excites it — that makes the slave-direction solve near-singular.
+`rom.forcing` and `rom.info.Ω` are vectors (empty when autonomous).
 
 ## Under the hood
 

@@ -4,7 +4,7 @@ Structural mechanical problem (clamped-clamped beam) using Ferrite.jl as FEM bac
 Demonstrates the MORFE.jl pipeline with the RHS-C batched FEM path:
   1. Assemble K, M via Ferrite element loops.
   2. Wrap geometric nonlinearity as FerriteGeometricNonlinearity (FEMMultilinearMap).
-  3. Build NDOrderModel and solve cohomological equations.
+  3. Build NthOrderModel and solve cohomological equations.
   4. Realify reduced dynamics.
 
 Material: St. Venant-Kirchhoff (nonlinearity up to cubic order in u).
@@ -78,8 +78,11 @@ E = 160e3
 ρ = 2.32e-3
 λ = (E * ν) / ((1 + ν) * (1 - 2ν))
 μ = E / (2(1 + ν))
-α = 0.5370828278264171 / 100.0      # Rayleigh mass coefficient
-β = 1.0 / (0.5370828278264171 * 100.0)  # Rayleigh stiffness coefficient
+# Rayleigh damping coefficients. Zero here because this run is autonomous: with no
+# forcing there is no steady response for damping to set the amplitude of, and the
+# high-level `main.jl` it is checked against (Gate A) is configured the same way.
+α = 0.0      # Rayleigh mass coefficient
+β = 0.0      # Rayleigh stiffness coefficient
 
 K_full = allocate_matrix(dh)
 M_full = allocate_matrix(dh)
@@ -116,11 +119,11 @@ term_quad  = svk_nonlinearity(2, dh, cv, free_to_local, n_free, λ, μ; max_uniq
 term_cubic = svk_nonlinearity(3, dh, cv, free_to_local, n_free, λ, μ; max_unique_cols = _max_uniq)
 
 # -----------------------------------------------------------------------
-# 4. NDOrderModel:  M ü + C u̇ + K u = F(u)
+# 4. NthOrderModel:  M ü + C u̇ + K u = F(u)
 #    linear_terms = (K, C, M) = (B0, B1, B2)
 # -----------------------------------------------------------------------
 
-model = NDOrderModel(
+model = NthOrderModel(
 	(K, C, M),
 	(term_quad, term_cubic),
 )
@@ -143,7 +146,7 @@ mutable struct Mechanical_Problem_Solver <: AbstractEigensolver
 	β::Float64
 end
 
-function MORFE.Eigenproblems.solve(model::NDOrderModel, solver::Mechanical_Problem_Solver)
+function MORFE.SpectralDecomposition.eigensolve(model::NthOrderModel, solver::Mechanical_Problem_Solver)
 	ω2,
 	ϕ = eigs(model.linear_terms[1], model.linear_terms[3];
 		nev = solver.nev, which = :SM)
@@ -172,7 +175,7 @@ function MORFE.Eigenproblems.solve(model::NDOrderModel, solver::Mechanical_Probl
 	return λ_all, reshape(evecs, FOM, 2, 2 * solver.nev)
 end
 
-function MORFE.Eigenproblems.solve_left(model::NDOrderModel, solver::Mechanical_Problem_Solver)
+function MORFE.SpectralDecomposition.eigensolve_left(model::NthOrderModel, solver::Mechanical_Problem_Solver)
 	@assert solver.right_eig_result !== nothing "Run solve() first"
 	R = solver.right_eig_result
 	FOM = size(R, 1) ÷ 2
@@ -194,12 +197,12 @@ function MORFE.Eigenproblems.solve_left(model::NDOrderModel, solver::Mechanical_
 	return solver.eigenvalues, reshape(L, FOM, 2, size(L, 2))
 end
 
-eigenproblem = solve_eigenproblem(
+eigenproblem = spectrum(
 	model,
 	solver = Mechanical_Problem_Solver(nothing, nothing, 10, α, β),
 	sorter! = (args...) -> nothing,
 )
-(eigenvalues, Y, X) = get_eigenpairs(eigenproblem)
+eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes, eigenproblem.left_eigenmodes
 
 println("\nFirst eigenvalues:")
 for (i, λ) in enumerate(eigenvalues[1:min(6, end)])
@@ -211,8 +214,6 @@ end
 # -----------------------------------------------------------------------
 
 FOM = n_free
-
-select_master_modes_by_sorting(eigenproblem, ROM)
 
 master_eigenvalues = SVector{ROM, ComplexF64}(eigenvalues[1:ROM])
 master_modes = Y[:, 1, 1:ROM]
@@ -244,15 +245,13 @@ resonance_set = resonance_set_from_complex_normal_form_style(
 # -----------------------------------------------------------------------
 
 print("\nCohomological solve: ")
+spectral = SpectralData(; eigenvalues = master_eigenvalues,
+	right_modes = master_modes, right_derivatives = master_modes_derivatives,
+	left_modes = left_eigenmodes, left_blocks = Array(left_modes_derivatives),
+	conjugate_permutation = [2, 1])
+
 _t_solve = @elapsed W, R = solve_cohomological_problem(
-	model, mset,
-	master_eigenvalues,
-	master_modes, left_eigenmodes,
-	resonance_set;
-	master_modes_derivatives = master_modes_derivatives,
-	left_modes_derivatives = left_modes_derivatives,
-	conjugate_permutation = [2, 1],
-)
+	model, mset, spectral, resonance_set)
 
 # -----------------------------------------------------------------------
 # 9. Realify reduced dynamics
@@ -284,15 +283,18 @@ end
 
 dirs = results_dirs(@__DIR__)
 save_rom(dirs, W, R)
-write_summary(dirs, [
-	"example: 01_clamped_beam_ferrite",
-	"model: clamped-clamped beam, St. Venant-Kirchhoff, Ferrite backend",
-	"mesh: 40x3x1 Hex8 elements, quadratic Lagrange (order 2)",
-	"n_dofs: $n_free",
-	"master_modes: $ROM",
-	"master_eigenvalues: $(collect(master_eigenvalues))",
-	"parametrisation_order: $max_degree",
-	"n_monomials: $(length(mset))",
-	"cohomological_solve_time_s: $(_t_solve)",
-])
+write_summary(
+	dirs,
+	[
+		"example: 01_clamped_beam_ferrite",
+		"model: clamped-clamped beam, St. Venant-Kirchhoff, Ferrite backend",
+		"mesh: 40x3x1 Hex8 elements, quadratic Lagrange (order 2)",
+		"n_dofs: $n_free",
+		"master_modes: $ROM",
+		"master_eigenvalues: $(collect(master_eigenvalues))",
+		"parametrisation_order: $max_degree",
+		"n_monomials: $(length(mset))",
+		"cohomological_solve_time_s: $(_t_solve)",
+	],
+)
 println("\nResults written to $(dirs.base)")

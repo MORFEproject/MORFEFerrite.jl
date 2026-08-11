@@ -175,14 +175,14 @@ r_eig = @timed solve_hopf_eigenproblem(
 #     enumerates every monomial z₁^a z̄₁^b η′^c up to total degree MAX_ORD.
 # ─────────────────────────────────────────────────────────────────────────────
 
-println(_out, "\n[7/10] Building NDOrderModel and multiindex set ...")
+println(_out, "\n[7/10] Building NthOrderModel and multiindex set ...")
 mset = all_multiindices_up_to(NVAR, MAX_ORD; min_degree = 1)
 convection = FluidConvection(fom; max_unique_cols = length(mset))
 g₁ = make_param_coupling(K_visc)
 h₀ = make_base_forcing(h₀_vec)
 ext_sys = ExternalSystem((0.0 + 0.0im,))
 
-model = NDOrderModel((B₀, B₁), (convection, g₁, h₀), ext_sys)
+model = NthOrderModel((B₀, B₁), (convection, g₁, h₀), ext_sys)
 println(_out, "  $(length(mset)) monomials (NVAR=$NVAR, order ≤ $MAX_ORD)")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ println(_out, "\n[8/10] Solving cohomological equations (order $MAX_ORD) ...")
 lambda_im = ComplexF64[complex(0.0, imag(λ)) for λ in master_eigenvalues]
 resonance_set = resonance_set_from_complex_normal_form_style(
 	mset, Vector{ComplexF64}(lambda_im), 0.05 * abs(imag(master_eigenvalues[1]));
-	external_eigenvalues = ComplexF64[0.0 + 0.0im])
+	external_eigenvalues = ComplexF64[0.0+0.0im])
 
 println(_out, "\nResonance set  (NVAR=$NVAR, max_degree=$MAX_ORD)")
 for t in 1:NVAR
@@ -209,14 +209,20 @@ for t in 1:NVAR
 	isempty(cols) || println(_out, "       ", join(["$(mset.exponents[k])" for k in cols], "  "))
 end
 
-conj_map = [2, 1, 3]   # mode 1 (Im>0) ↔ mode 2 (Im<0); η′ self-conjugate
-r_dpim = @timed solve_cohomological_problem(
-	model, mset,
-	master_eigenvalues,
-	master_modes .* 1e-2, left_eigenmodes .* 1e-2,   # scale modes for better numerical stability (see discussion in #48)
-	resonance_set;
-	conjugate_permutation = conj_map,
-)
+# mode 1 (Im>0) ↔ mode 2 (Im<0); the external block is derived from `ext_sys` rather than
+# written out, so it stays correct if the external system ever gains a non-triangular
+# linear part (which would re-base its coordinates). Here it yields [2, 1, 3]: η′ has a
+# real eigenvalue, hence is its own conjugate — an odd N_EXT that the usual
+# adjacent-pairs formula cannot express.
+conj_map = full_conjugate_permutation([2, 1], ext_sys)
+@assert conj_map == [2, 1, 3]
+# The mode scaling is applied to the raw arrays BEFORE the bundle is built: `SpectralData`
+# deliberately has no `scale` field, so conditioning tweaks stay visible at the call site.
+spectral = SpectralData(; eigenvalues = master_eigenvalues,
+	right_modes = master_modes .* 1e-2,   # scale modes for better numerical stability (see discussion in #48)
+	left_modes = left_eigenmodes .* 1e-2)
+r_dpim = @timed solve_cohomological_problem(model, mset, spectral, resonance_set;
+	conjugate_permutation = conj_map)
 (W, R) = r_dpim.value
 
 # ─────────────────────────────────────────────────────────────────────────────

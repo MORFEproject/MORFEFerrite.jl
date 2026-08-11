@@ -51,10 +51,13 @@ ip = Lagrange{RefHexahedron, 2}()^3
 geo_ip = Lagrange{RefHexahedron, 2}()
 qr = QuadratureRule{RefHexahedron}(3)
 cv = CellValues(qr, ip, geo_ip)
-dh = DofHandler(grid); add!(dh, :u, ip); close!(dh)
+dh = DofHandler(grid);
+add!(dh, :u, ip);
+close!(dh)
 ch = ConstraintHandler(dh)
 add!(ch, Dirichlet(:u, getfacetset(grid, "Dirichlet"), (x, t) -> zeros(3), [1, 2, 3]))
-close!(ch); update!(ch, 0.0)
+close!(ch);
+update!(ch, 0.0)
 free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
 free_to_local = Dict(d => i for (i, d) in enumerate(free))
 n_free = length(free)
@@ -62,11 +65,11 @@ println("Total DOFs: ", ndofs(dh), "   free: ", n_free)
 
 # ## Base operators and eigenproblem (θ = 0 configuration)
 K0_full, M0_full = BASE_KM(dh, cv)
-K_ref = K0_full[free, free]; M_ref = M0_full[free, free]
+K_ref = K0_full[free, free];
+M_ref = M0_full[free, free]
 solver_eig = StructureModalDampingEigensolver(NEV, ALPHA, BETA)
-eigenproblem = solve_eigenproblem(K_ref, M_ref, solver_eig; sorter! = (args...) -> nothing)
-(eigenvalues, Y, X) = get_eigenpairs(eigenproblem)
-select_master_modes_by_sorting(eigenproblem, ROM)
+eigenproblem = spectrum(K_ref, M_ref, solver_eig; sorter! = (args...) -> nothing)
+eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes, eigenproblem.left_eigenmodes
 master_eigenvalues = SVector{ROM, ComplexF64}(eigenvalues[1:ROM])
 master_modes = Y[:, 1, 1:ROM]
 left_eigenmodes = X[:, 1:ROM]
@@ -82,7 +85,9 @@ provider = GEOM_BUILDER(dh, free, master_modes, ndofs(dh))
 
 # ## Parametric stiffness/mass coefficient matrices over the θ box
 K_arr, M_arr = PARAM_KM(dh, cv, provider, free)
-K = K_arr[1]; M = M_arr[1]; C = ALPHA * M + BETA * K
+K = K_arr[1];
+M = M_arr[1];
+C = ALPHA * M + BETA * K
 RUN_SANITY_CHECKS && SANITY(K_arr, M_arr, K_ref, master_eigenvalues, master_modes)
 
 # ## Parametric nonlinear maps and linear K/C/M corrections
@@ -101,7 +106,7 @@ println("maps: quad=$(length(quad_maps)) cube=$(length(cube_maps)) ",
 # ## Augmented model, multiindex set, and the cohomological solve
 ext_sys = ExternalSystem(ntuple(_ -> complex(0.0, 0.0), N_EXT))
 ZERO = spzeros(eltype(K), n_free, n_free)
-model = NDOrderModel((K, C, M, ZERO),
+model = NthOrderModel((K, C, M, ZERO),
 	(quad_maps..., cube_maps...,
 		K_corrections..., C_corrections..., M_corrections...),
 	ext_sys)
@@ -116,12 +121,17 @@ resonance_set = resonance_set_from_complex_normal_form_style(
 left_modes_derivatives = left_eigenmode_orders_from_slice(
 	model.linear_terms, left_eigenmodes, collect(master_eigenvalues))[:, 1:(end-1), :]
 
-@time (W, R) = parametrise(model, MAXZ, eigenproblem;
-	mset = mset,
+## One spectral object carries the master eigenvalues and both sets of order-blocks;
+## `SpectralData` applies the mirrored right/left convention. The ROM-length master
+## pairing is not stated here because PERMUTATION spans the external states too, so it
+## goes to the solve, which uses it verbatim.
+spectral = SpectralData(; eigenvalues = master_eigenvalues,
+	right_modes = master_modes, right_derivatives = master_modes_derivatives,
+	left_modes = left_eigenmodes, left_blocks = Array(left_modes_derivatives))
+
+@time (W, R) = parametrise(model, spectral, mset;
 	resonance = resonance_set,
-	conjugate_permutation = PERMUTATION,
-	master_modes_derivatives = master_modes_derivatives,
-	left_modes_derivatives = left_modes_derivatives)
+	conjugate_permutation = PERMUTATION)
 
 # ## Save the standard result layout (data/{W.jls, R.jls, R_coefficients.csv})
 MORFE.save_rom(joinpath(@__DIR__, "results"), W, R; metadata = META())

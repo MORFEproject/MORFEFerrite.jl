@@ -3,3 +3,5 @@ Manifest.toml
 
 # Generated example outputs
 examples/*/results/
+.DS_Store
+*/.DS_Store

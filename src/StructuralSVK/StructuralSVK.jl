@@ -16,11 +16,12 @@ backend).
 module StructuralSVK
 
 using MORFE
-import MORFE: parametrise, save_rom
+import MORFE: parametrise, save_rom, spectrum
 using Ferrite, FerriteGmsh, Arpack, LinearMaps
 using LinearAlgebra, SparseArrays, Serialization, Printf
 using StaticArrays
-using ..Common: load_comsol_grid
+using ..Common: load_comsol_grid, AbstractAssembledModel
+import ..Common: build_model
 
 # Ferrite SVK backend: FerriteGeometricNonlinearity <: MORFE.FEMMultilinearMap{2}
 # and the linear assemble_KM!.
@@ -60,7 +61,7 @@ include("postprocess.jl")
 
 export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
 	RayleighDamping, HarmonicForcing,
-	AssembledMechanicalModel, InvariantManifoldROM, RayleighEigenSolver,
+	AssembledMechanicalModel, InvariantManifoldROM, RayleighEigensolver,
 	mechanical_model, parametrise, spectrum, eigenfrequencies, print_mode_table,
 	resonances, print_resonances, real_dynamics, print_equations, save_rom,
 	svk_nonlinearity, svk_assemble_KM!
