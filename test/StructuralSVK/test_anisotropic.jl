@@ -13,6 +13,7 @@ using MORFEFerrite.StructuralSVK: svk_assemble_KM!, svk_nonlinearity,
 using Ferrite, Arpack, LinearMaps
 using SparseArrays, LinearAlgebra, StaticArrays
 using Test
+include(joinpath(@__DIR__, "rom_pipeline.jl"))
 
 const SVK = MORFEFerrite.StructuralSVK
 
@@ -120,8 +121,8 @@ end
 		dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
 	@test mani.info.n_dofs == miso.info.n_dofs
 
-	ri = SVK.parametrise(miso; master = [1], order = 3)
-	ra = SVK.parametrise(mani; master = [1], order = 3)
+	ri = svk_build_rom(miso; master = [1], order = 3)
+	ra = svk_build_rom(mani; master = [1], order = 3)
 	a = ri.R.poly.coefficients
 	b = ra.R.poly.coefficients
 	@test size(a) == size(b)

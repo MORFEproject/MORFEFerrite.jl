@@ -115,7 +115,11 @@ extra rows on top (a caller's own `solve_time_s`, say).
 """
 function InvariantManifoldROM(W, R, meta::NamedTuple; master::Vector{Int}, order::Int,
         info::NamedTuple = (;))
-    base = (; N_EXT = meta.N_EXT, Ω = meta.Ω, eig_time_s = meta.eig_time_s)
+    # `solve_time_s` defaults to NaN rather than 0.0: the caller owns the solve, so this
+    # type cannot measure it, and a plausible-looking zero in a summary is worse than an
+    # obvious "not recorded". Pass `info = (; solve_time_s = t)` to fill it in.
+    base = (; N_EXT = meta.N_EXT, Ω = meta.Ω, eig_time_s = meta.eig_time_s,
+        n_monomials = meta.n_monomials, solve_time_s = NaN)
     merged = haskey(meta, :case_info) ? (; meta.case_info..., base..., info...) :
              (; base..., info...)
     return InvariantManifoldROM(W, R, collect(meta.spectrum.eigenvalues), master, order,

@@ -8,6 +8,7 @@ using MORFEFerrite.StructuralSVK: svk_assemble_KM!, svk_nonlinearity
 using Ferrite, FerriteGmsh, Arpack, LinearMaps
 using SparseArrays, LinearAlgebra, StaticArrays
 using Test
+include(joinpath(@__DIR__, "rom_pipeline.jl"))
 
 const SVK = MORFEFerrite.StructuralSVK
 @test SVK !== nothing
@@ -37,7 +38,7 @@ const _order = 3
 		material = SVK.SVKMaterial(E = _E, ν = _ν, ρ = _ρ),
 		damping = SVK.RayleighDamping(α = _α, β = _β),
 		dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
-	rom = SVK.parametrise(beam; master = [1], order = _order)
+	rom = svk_build_rom(beam; master = [1], order = _order)
 
 	# Hand-built reference: ex01 §§1–8 inline on an identical grid.
 	grid2 = _test_grid()
@@ -108,8 +109,8 @@ end
 		damping = SVK.RayleighDamping(α = _α, β = _β),
 		dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
 
-	rom0 = SVK.parametrise(beam; master = [1], order = _order)
-	romf = SVK.parametrise(beam; master = [1], order = _order,
+	rom0 = svk_build_rom(beam; master = [1], order = _order)
+	romf = svk_build_rom(beam; master = [1], order = _order,
 		forcing = SVK.HarmonicForcing(mode = 1, amplitude = 0.0))
 
 	@test romf.info.N_EXT == 2
@@ -138,7 +139,7 @@ end
 		material = SVK.SVKMaterial(E = _E, ν = _ν, ρ = _ρ),
 		damping = SVK.RayleighDamping(α = _α, β = _β),
 		dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
-	romf = SVK.parametrise(beam; master = [1], order = _order,
+	romf = svk_build_rom(beam; master = [1], order = _order,
 		forcing = SVK.HarmonicForcing(mode = 1, amplitude = 0.1))
 	expsf = romf.R.poly.multiindex_set.exponents
 	ext_cols = [i for (i, e) in enumerate(expsf) if e[3] + e[4] > 0]
@@ -154,12 +155,12 @@ end
 		damping = SVK.RayleighDamping(α = _α, β = _β),
 		dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
 
-	rom0 = SVK.parametrise(beam; master = [1], order = _order)
+	rom0 = svk_build_rom(beam; master = [1], order = _order)
 	ω1 = abs(rom0.eigenvalues[1])
 
 	# Two zero-amplitude forcings must collapse onto the autonomous ROM
 	# (multi-forcing Gate B), with one external pair per forcing.
-	rom2 = SVK.parametrise(beam; master = [1], order = _order,
+	rom2 = svk_build_rom(beam; master = [1], order = _order,
 		forcing = [SVK.HarmonicForcing(mode = 1, amplitude = 0.0),
 			SVK.HarmonicForcing(mode = 1, amplitude = 0.0, Ω = 3.0 * ω1)])
 
@@ -185,7 +186,7 @@ end
 	# 3,4) and forcing 2, at zero amplitude, must excite nothing on slots 5,6.
 	# A closure using `sum(r)` instead of indexing `r` would drive both pairs
 	# with forcing 1's load vector and fail this.
-	romsel = SVK.parametrise(beam; master = [1], order = _order,
+	romsel = svk_build_rom(beam; master = [1], order = _order,
 		forcing = [SVK.HarmonicForcing(mode = 1, amplitude = 0.1),
 			SVK.HarmonicForcing(mode = 1, amplitude = 0.0, Ω = 3.0 * ω1)])
 	expsel = romsel.R.poly.multiindex_set.exponents
@@ -230,7 +231,7 @@ end
 		damping = SVK.RayleighDamping(α = 0.0, β = 0.0),
 		dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
 	warns0, rom0 = _run() do
-		SVK.parametrise(square_beam; master = [1], order = 3)
+		svk_build_rom(square_beam; master = [1], order = 3)
 	end
 	@test isempty(rom0.forcing)              # genuinely autonomous
 	@test length(warns0) == 1                # one per PAIR, not per conjugate
@@ -241,7 +242,7 @@ end
 	# 1. Undamped, forcing mode 2 off the manifold at its own frequency: detuning
 	#    is ~0, so the direction solve is near-singular and must be flagged.
 	warns, rom = _run() do
-		SVK.parametrise(undamped; master = [1], order = 3,
+		svk_build_rom(undamped; master = [1], order = 3,
 			forcing = SVK.HarmonicForcing(mode = 2, amplitude = 0.1))
 	end
 	@test length(warns) == 1
@@ -256,7 +257,7 @@ end
 	#     set can see this, which is exactly what a ±iΩ-only check would miss.
 	λ = SVK.eigenfrequencies(undamped; nev = 10)
 	warns1b, _ = _run() do
-		SVK.parametrise(undamped; master = [1], order = 3,
+		svk_build_rom(undamped; master = [1], order = 3,
 			forcing = SVK.HarmonicForcing(mode = 1, amplitude = 0.1,
 				Ω = abs(λ[3]) / 3))
 	end
@@ -279,7 +280,7 @@ end
 		@test minimum(abs.(im * n * Ω_gap .- λ)) > 0.05
 	end
 	warns2, _ = _run() do
-		SVK.parametrise(undamped; master = [1], order = 3,
+		svk_build_rom(undamped; master = [1], order = 3,
 			forcing = SVK.HarmonicForcing(mode = 2, amplitude = 0.1, Ω = Ω_gap))
 	end
 	@test isempty(warns2)
@@ -289,14 +290,14 @@ end
 	#    rad/s default tolerance by a comfortable margin rather than hardcoding.
 	ω2 = abs(λ[3])
 	warns3, _ = _run() do
-		SVK.parametrise(_beam(0.0, 0.6 / ω2^2); master = [1], order = 3,
+		svk_build_rom(_beam(0.0, 0.6 / ω2^2); master = [1], order = 3,
 			forcing = SVK.HarmonicForcing(mode = 2, amplitude = 0.1))
 	end
 	@test isempty(warns3)
 
 	# 4. Pair 2 on the manifold: not an outer direction at all ⇒ silent.
 	warns4, _ = _run() do
-		SVK.parametrise(undamped; master = [1, 2], order = 3,
+		svk_build_rom(undamped; master = [1, 2], order = 3,
 			forcing = SVK.HarmonicForcing(mode = 2, amplitude = 0.1))
 	end
 	@test isempty(warns4)
@@ -311,7 +312,7 @@ end
 	# Non-leading master pairs are supported (see test_master_selection.jl); a
 	# forcing outside the master set is now a warning, not an error, so the
 	# rejected cases are malformed master lists and malformed forcing modes.
-	@test_throws AssertionError SVK.parametrise(beam; master = [2, 1], order = 3)
-	@test_throws AssertionError SVK.parametrise(beam; master = [1], order = 3,
+	@test_throws AssertionError svk_build_rom(beam; master = [2, 1], order = 3)
+	@test_throws AssertionError svk_build_rom(beam; master = [1], order = 3,
 		forcing = SVK.HarmonicForcing(mode = 0, amplitude = 0.1))
 end

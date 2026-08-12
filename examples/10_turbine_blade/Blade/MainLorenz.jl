@@ -132,9 +132,6 @@ if export_modes == true
 	write_paraview_modes(_out, grid, dh, eigenvalues, Y, free; n_modes = 2*cfg.neig)
 end
 
-
-
-
 term_quad  = FerriteGeometricNonlinearity{2}(dh, cv, free_to_local, n_free, λ, μ; max_unique_cols = ncols)
 term_cubic = FerriteGeometricNonlinearity{3}(dh, cv, free_to_local, n_free, λ, μ; max_unique_cols = ncols)
 
@@ -154,9 +151,9 @@ scale_time = 72.5864/10.1945
 # the previous system is then diagonalised through the eigenvectors, resulting in the following system:
 external_system = ExternalSystem(
 	DensePolynomial(
-		scale_time*ComplexF64[-13.8546 0 0 0.139722 0.36342+0.251644im 0.36342-0.251644im -0.109834+0.0352947im -0.047656 -0.109834-0.0352947im
-			  0 0.0939556-10.1945im 0 -0.957035+1.22873im -0.139722+1.48651im 0.178149+0.379738im -0.347639-0.337818im 0.331857-0.423992im 0.116385-0.0280735im
-			  0 0 0.0939556+10.1945im -0.957035-1.22873im 0.178149-0.379738im -0.139722-1.48651im 0.116385+0.0280735im 0.331857+0.423992im -0.347639+0.337818im],
+		scale_time*ComplexF64[                -13.8546 0 0 0.139722 0.36342+0.251644im 0.36342-0.251644im -0.109834+0.0352947im -0.047656 -0.109834-0.0352947im
+			0 0.0939556-10.1945im 0 -0.957035+1.22873im -0.139722+1.48651im 0.178149+0.379738im -0.347639-0.337818im 0.331857-0.423992im 0.116385-0.0280735im
+			0 0 0.0939556+10.1945im -0.957035-1.22873im 0.178149-0.379738im -0.139722-1.48651im 0.116385+0.0280735im 0.331857+0.423992im -0.347639+0.337818im],
 		all_multiindices_up_to(3, 2, min_degree = 1),
 	),
 )
@@ -192,7 +189,7 @@ print_resonance_summary(out, resonance_set, mset, master_eigs, ext_eigs, tol_rel
 #	readline() == "y" || (close_log(_log); exit(0))
 #end
 left_modes_derivatives = left_eigenmode_orders_from_slice(
-	model.linear_terms, left_eigenmodes, collect(master_eigenvalues))[:, 1:(end - 1), :]
+	model.linear_terms, left_eigenmodes, collect(master_eigenvalues))[:, 1:(end-1), :]
 spectral = SpectralData(; eigenvalues = master_eigenvalues,
 	right_modes = master_modes, right_derivatives = master_modes_derivatives,
 	left_modes = left_eigenmodes, left_blocks = Array(left_modes_derivatives))

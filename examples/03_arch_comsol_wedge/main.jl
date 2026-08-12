@@ -53,12 +53,22 @@ FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.
 
 # ── PIPELINE — generic; no need to edit ──────────────────────────────────────
 # ## Assemble the mechanical model (K, M, C on free DOFs + SVK nonlinearity)
-model = SVK.mechanical_model(MESH;
+model_case = SVK.mechanical_model(MESH;
 	material = MATERIAL, damping = DAMPING, dirichlet = DIRICHLET,
 	fe_order = FE_ORDER, quad_order = QUAD_ORDER)
 
-# ## Compute the invariant-manifold ROM (eigenproblem + cohomological solve)
-rom = SVK.parametrise(model; master = MASTER, order = ORDER, forcing = FORCING)
+# ## Compute the invariant-manifold ROM.
+# Three steps, deliberately: MORFEFerrite contributes `build_model` — the single
+# contract every physics backend implements — and MORFE owns `parametrise`. There
+# is no backend-specific `parametrise` wrapping the two.
+(; model, spectral, meta) = build_model(model_case;
+	master = MASTER, forcing = FORCING, expansion_order = ORDER)
+
+t_solve = @elapsed W, R = parametrise(model, spectral, ORDER;
+	resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
+
+rom = SVK.InvariantManifoldROM(W, R, meta; master = MASTER, order = ORDER,
+	info = (; solve_time_s = t_solve))
 
 # ## Report the realified reduced dynamics and save the standard result layout
 SVK.print_equations(rom)

@@ -20,6 +20,11 @@ function _max_forcing_mode(forcing)
 	return isempty(fs) ? 0 : maximum(f -> f.mode, fs)
 end
 
+# Number of multiindices in `nvar` variables of total degree 1…order — the size of
+# `all_multiindices_up_to(nvar, order; min_degree = 1)` WITHOUT building it. Counting
+# keeps `build_model` free of `MultiindexSet`, which the contract requires.
+_n_multiindices(nvar::Int, order::Int) = binomial(nvar + order, order) - 1
+
 """
 	build_model(m::AssembledMechanicalModel; master = [1], forcing = nothing,
 				nev = ..., spectrum = nothing) -> (; model, spectral, meta)
@@ -49,7 +54,8 @@ function build_model(m::AssembledMechanicalModel;
 	forcing::Union{Nothing, HarmonicForcing, AbstractVector{<:HarmonicForcing}} = nothing,
 	nev::Int = max(10, 2 * max(maximum(master), _max_forcing_mode(forcing)) + 4),
 	spectrum = nothing,
-	n_monomials::Int = 1)
+	expansion_order::Union{Nothing, Int} = nothing,
+	n_monomials::Union{Nothing, Int} = nothing)
 	forcings = _forcings(forcing)
 	@assert all(>(0), master)&&allunique(master) "master must list distinct positive mode pairs; got master = $master"
 	@assert issorted(master) "master must be sorted (the ROM coordinate order follows it); got master = $master"
@@ -59,7 +65,12 @@ function build_model(m::AssembledMechanicalModel;
 
 	ROM = 2 * length(master)
 	N_EXT = 2 * length(forcings)
-	terms = Tuple(m.term_factory(d, n_monomials) for d in m.nonlinear_degrees)
+	# Sizes the FEM terms' batched-column cache. `expansion_order` COUNTS the monomials
+	# of a total-degree truncation rather than building the set — `build_model` must not
+	# construct a `MultiindexSet`. A caller with a custom set passes `n_monomials` instead.
+	n_cols = something(n_monomials,
+		expansion_order === nothing ? 1 : _n_multiindices(ROM + N_EXT, expansion_order))
+	terms = Tuple(m.term_factory(d, n_cols) for d in m.nonlinear_degrees)
 
 	# ── Spectrum of the autonomous operator (the forcing does not enter) ────
 	eig_model = NthOrderModel((m.K, m.C, m.M), terms)
@@ -120,8 +131,11 @@ function build_model(m::AssembledMechanicalModel;
 	σ = reduce(vcat, [[2p, 2p - 1] for p in 1:n_pairs])
 	sd = SpectralData(model, sp; master = master_indices, conjugate_permutation = σ)
 
-	meta = (; forcings = forcings, Ω = Ωs, N_EXT = N_EXT,
+	# `case_info` and `external_system` are carried so a caller can package an
+	# `InvariantManifoldROM` and call `MORFE.save_rom` without holding the case.
+	meta = (; forcings = forcings, Ω = Ωs, N_EXT = N_EXT, n_monomials = n_cols,
 		eig_time_s = t_eig, master_indices = master_indices, spectrum = sp,
+		case_info = m.info, external_system = model.external_system,
 		ext_eigs = model.external_system === nothing ? ComplexF64[] :
 				   Vector(model.external_system.eigenvalues))
 	return (; model = model, spectral = sd, meta = meta)

@@ -52,8 +52,9 @@ println("Gate A PASSED ✓")
 # ── Gate B ───────────────────────────────────────────────────────────────────
 println("═"^60, "\nGate B: zero-amplitude forcing consistency (order 5)\n", "═"^60)
 using StaticArrays: SVector
-rom0 = SVK.parametrise(model; master = [1], order = 5)
-romf = SVK.parametrise(model; master = [1], order = 5,
+include(joinpath(@__DIR__, "rom_pipeline.jl"))
+rom0 = svk_build_rom(model_case; master = [1], order = 5)
+romf = svk_build_rom(model_case; master = [1], order = 5,
     forcing = SVK.HarmonicForcing(mode = 1, amplitude = 0.0))
 exps0 = rom0.R.poly.multiindex_set.exponents
 expsf = romf.R.poly.multiindex_set.exponents

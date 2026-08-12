@@ -66,7 +66,28 @@ Not touched: `src/`. `StructuralSVK/parametrise.jl` already goes through
 
 ---
 
-## 3. Left to do — Change 2c: delete this repo's duplicate outer-resonance warning
+## 3. ✅ DONE — Change 2c: delete this repo's duplicate outer-resonance warning
+
+**Landed.** Resolved by option 1 below (the full involution), which needed the small
+additive change to MORFE's `_resolve_permutation` that this section anticipated:
+`SpectralData(model, sp; conjugate_permutation = σ)` now accepts a **spectrum-wide**
+involution as well as a ROM-length master block, validated by a new
+`_validate_spectrum_permutation`. `StructuralSVK.build_model` passes
+`σ = reduce(vcat, [[2p, 2p-1] for p in 1:n_pairs])` over every entry.
+
+With that, `_warn_outer_resonances`, its `resonances` re-run and the `warn_outer = false`
+suppression are gone from `src/StructuralSVK/`, and MORFE's own warner reports one warning
+per conjugate pair naming the physical mode. The spec testset
+(`test/StructuralSVK/test_structural_svk.jl`, "outer-resonance diagnostic") passes
+**unchanged**, and Gates A/B did not move — as predicted, since the master restriction MORFE
+derives from the wide involution is identical to the ROM-length block.
+
+`resonances` / `print_resonances` were **kept**: they are exported preview API over MORFE's
+public `resonance_set_from_complex_normal_form_style`, not a reimplementation of detection.
+
+The original analysis follows, for the record.
+
+### (original) Change 2c
 
 MORFE's own warning is now cheap (a constant ~64 B when nothing is flagged, against the
 246 kB it used to cost) and reports **one warning per conjugate pair**, naming both the

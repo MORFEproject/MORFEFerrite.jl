@@ -5,12 +5,12 @@
 
 Pipeline (see the Kármán example driver):
 
-	fom  = setup_fem(meshfile)                       # Ferrite P2/P1 spaces + BCs
-	s0   = solve_steady_state(fom; Re0)              # Newton base flow
-	ops  = assemble_linear_operators(s0, fom; Re0)   # linearised operators
+	fom = setup_fem(meshfile)                       # Ferrite P2/P1 spaces + BCs
+	s0 = solve_steady_state(fom; Re0)              # Newton base flow
+	ops = assemble_linear_operators(s0, fom; Re0)   # linearised operators
 	conv = FluidConvection(fom; max_unique_cols)     # f₂(s,s) FEMMultilinearMap{1}
-	g1   = make_param_coupling(K_visc_free)          # −D·η′·K_raw·u′ (Re-parametric)
-	h0   = make_base_forcing(h₀_vec_free)            # base-flow forcing direction
+	g1 = make_param_coupling(K_visc_free)          # −D·η′·K_raw·u′ (Re-parametric)
+	h0 = make_base_forcing(h₀_vec_free)            # base-flow forcing direction
 
 Mesh *generation* (Gmsh) deliberately stays example-local; `setup_fem` only
 reads a `.msh` via FerriteGmsh.

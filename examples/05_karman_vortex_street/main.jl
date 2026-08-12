@@ -90,7 +90,7 @@ println(_out, _sep)
 # 1 — Mesh: Turek–Schäfer channel (2.2 × 0.41 m) with a Ø 0.1 m cylinder
 # ─────────────────────────────────────────────────────────────────────────────
 
-println(_out, "\n[1/10] Generating Turek–Schäfer mesh ...")
+println(_out, "\n[1/6] Generating Turek–Schäfer mesh ...")
 r_mesh = @timed generate_mesh(;
 	h_cyl = MESH_H_CYL,
 	h_wake = MESH_H_WAKE,
@@ -105,17 +105,7 @@ meshfile = r_mesh.value
 #     around the base flow vanishes on every prescribed boundary.
 # ─────────────────────────────────────────────────────────────────────────────
 
-#     Stages 2-5 — FEM setup, the Newton base flow, the linearised operators, and
-#     the η′ coupling — are ONE call. With ν = D/Re the parameter
-#     η′ = 1/Re − 1/Re₀ enters linearly through the viscous term:
-#       g₁(s, η′) = −D·η′·K_raw·u′   (operator change on the perturbation)
-#       h₀(η′)    = −D·η′·K_raw·u₀   (base-flow forcing; u₀ is the FULL base flow,
-#     its prescribed inlet DOFs carrying the Poiseuille profile, so h₀ needs the
-#     rectangular free×ALL block of K_raw rather than the free×free one).
-#     `fluid_model` applies that −D scaling, so the convention lives in the module
-#     instead of in a comment here.
-
-println(_out, "\n[2-5/10] Assembling the fluid model at Re₀ = $Re₀ ...")
+println(_out, "\n[2/6] Assembling the fluid model at Re₀ = $Re₀ ...")
 r_model = @timed fluid_model(meshfile; Re = Re₀)
 case = r_model.value
 show(_out, MIME"text/plain"(), case)
@@ -124,74 +114,72 @@ fom = case.fom
 s₀_full = case.s₀_full
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6 — Master modes: the Hopf pair. Shift-invert ARPACK on A_lin y = λ B₁ y finds
+# 3 — Master modes: the Hopf pair. Shift-invert ARPACK on A_lin y = λ B₁ y finds
 #     the least-damped complex-conjugate eigenpair λ₁,₂ = σ₀ ± iω₀ (σ₀ ≈ 0 near
 #     Re_c, ω₀ ≈ 16.86 rad/s — the shedding frequency). Its right/left
 #     eigenvectors seed the two master coordinates z₁, z̄₁ of the manifold.
 # ─────────────────────────────────────────────────────────────────────────────
 
-#     Stages 6-8 are the reduction, and are also ONE call.
-#
-#     6 — Master modes: shift-invert ARPACK on A_lin y = λ B₁ y finds the
-#         least-damped conjugate pair λ₁,₂ = σ₀ ± iω₀ (σ₀ ≈ 0 near Re_c,
-#         ω₀ ≈ 16.86 rad/s — the shedding frequency), seeding z₁, z̄₁. The
-#         `A_lin = −B₀` convention and the `1e-2` mode scaling both belong to the
-#         module now; the scaling is passed as `scale`, since `SpectralData` has no
-#         `scale` field and the gauge must stay visible.
-#     7 — The model: quadratic convection f₂(s,s) = −(u·∇)u assembled on the fly,
-#         the two η′ terms, and η′ itself as a trivial external system η̇′ = 0.
-#         N_EXT = 1 is ODD — η′ is real, hence self-conjugate — so the permutation
-#         is derived with `full_conjugate_permutation` rather than written out.
-#     8 — The solve. A normal-form resonance set keeps only the resonant monomials
-#         z₁|z₁|^{2k} η′^j in R; everything else is absorbed into W. Detection uses
-#         `:imaginary_part_only` (frequency alone, ignoring the growth rate) — the
-#         historical choice, now named. It is graded, so lower orders are exact
-#         truncations of this run.
-
-println(_out, "\n[6-8/10] Hopf eigenproblem, model and cohomological solve (order $MAX_ORD) ...")
-r_dpim = @timed parametrise(case;
-	order = MAX_ORD,
+println(_out, "\n[3/6] Hopf eigenproblem and model assembly ...")
+mset = all_multiindices_up_to(NVAR, MAX_ORD; min_degree = 1)
+r_build = @timed build_model(case;
+	n_monomials = length(mset),
 	nev = EIG_NEV,
 	sigma_re = EIG_SIGMA_RE,
 	sigma_im = EIG_SIGMA_IM,
 	target_freq = EIG_TARGET_FREQ,
-	scale = 1e-2,
-	resonance_eigenvalues = :imaginary_part_only)
-rom = r_dpim.value
-show(_out, MIME"text/plain"(), rom)
-println(_out)
-
-W, R, mset = rom.W, rom.R, rom.mset
-master_eigenvalues = rom.eigenvalues
-all_eigenvalues = rom.info.spectrum.all_eigenvalues
-all_modes = rom.info.spectrum.all_modes
+	scale = 1e-2)
+(; model, spectral, meta) = r_build.value
+println(_out, "  $(length(mset)) monomials (NVAR=$NVAR, order ≤ $MAX_ORD)")
+println(_out, "  conjugate permutation: $(meta.conjugate_permutation)")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9 — Report the reduced dynamics: the first row ż₁ = R₁(z₁, z̄₁, η′) is the
+# 4 — Run parametrise to solve the cohomological equations and produce the 
+#     reduced dynamics R(z, z̄, η′) and the transformation W(z, z̄, η′) from the 
+#     reduced coordinates to the full FEM state.
+# ─────────────────────────────────────────────────────────────────────────────
+
+println(_out, "\n[4/6] Solving cohomological equations (order $MAX_ORD) ...")
+r_dpim = @timed parametrise(model, spectral, mset;
+	resonance = ResonanceConfig(style = :complex_normal_form,
+		tol_relative = 0.05, eigenvalue_projection = :imaginary_part_only),
+	conjugate_permutation = meta.conjugate_permutation)
+(W, R) = r_dpim.value
+
+master_eigenvalues = collect(meta.spectrum.eigenvalues)
+all_eigenvalues = meta.spectrum.all_eigenvalues
+all_modes = meta.spectrum.all_modes
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5 — Report the reduced dynamics: the first row ż₁ = R₁(z₁, z̄₁, η′) is the
 #     Stuart-Landau equation (row 2 is its conjugate, row 3 is η̇′ = 0).
 #     Supercritical Hopf ⇔ Re(c₂₁₀) < 0 for the [2,1,0] monomial.
 # ─────────────────────────────────────────────────────────────────────────────
 
-println(_out, "\n[9/10] Reduced dynamics — first row ż₁ = R₁(z₁, z̄₁, η′) ...")
+println(_out, "\n[5/6] Reduced dynamics — first row ż₁ = R₁(z₁, z̄₁, η′) ...")
 export_reduced_dynamics(_out, DATA_DIR, R, master_eigenvalues;
 	re0 = Re₀, ord = MAX_ORD, nvar = NVAR)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 10 — Save the ROM and the two physical observables that compare_orders.py
+# 6 — Save the ROM and the two physical observables that compare_orders.py
 #      evaluates along the limit cycle:
 #        · lift polynomial  L(z) = L0 + Σ (lᵀW_α) z^α   (pressure lift on the cylinder)
 #        · TKE Gram matrix  G = W_velᵀ M_vel W_vel / |Ω| (period-averaged kinetic energy)
 # ─────────────────────────────────────────────────────────────────────────────
 
-println(_out, "\n[10/10] Saving ROM and exporting observables ...")
+println(_out, "\n[6/6] Saving ROM and exporting observables ...")
 
-MORFE.save_rom(RESULTS_DIR, W, R; metadata = [
-	"example" => "05_karman_vortex_street", "Re0" => Re₀,
-	"max_order" => MAX_ORD, "fast" => FAST])
+# `external_system` records the external coordinates the ROM was written in — the
+# model has one, so it is passed rather than defaulted away. `Re0`/`max_order` are
+# NOT repeated here: `write_summary` records `order` and FluidNavierStokes records
+# `Re0`, and duplicated keys in summary.txt break naive parsers.
+MORFE.save_rom(RESULTS_DIR, W, R;
+	external_system = meta.external_system,
+	metadata = ["example" => "05_karman_vortex_street", "fast" => FAST])
 
 # Lift functional: l picks the pressure traction −p·n_y on the cylinder boundary.
 (l_free, L0_lift) = lift_functional(case)
-L_coeffs_lift = export_lift_polynomial(_out, DATA_DIR, rom, l_free, L0_lift)
+L_coeffs_lift = export_lift_polynomial(_out, DATA_DIR, W, l_free, L0_lift)
 
 # TKE Gram: the L×L matrix that lets Python evaluate ⟨TKE⟩ without FOM-sized data.
 (M_vel, vel_rows, area) = prepare_energy_gram(fom)
@@ -208,10 +196,15 @@ EXPORT_MATLAB && export_matlab_model(_out, DATA_DIR, csv_path; re0 = Re₀, ord 
 # physics modules; FluidNavierStokes contributes its own rows through
 # `Common.summary_entries`. Appends to the summary.txt `MORFE.save_rom` wrote.
 write_summary(_out, joinpath(RESULTS_DIR, "summary.txt"), case;
-	rom = rom,
+	rom = meta,
 	title = "Kármán Vortex Street DPIM — Summary  " *
 			"(Re₀ = $Re₀, order = $MAX_ORD, NVAR = $NVAR)",
+	# The mesh and the solve are timed HERE, not inside a module: mesh generation is
+	# example-local and the reduction is MORFE's `parametrise`, so neither shows up in
+	# `case.info` or `meta`.
 	metadata = ["mesh_time_s" => @sprintf("%.3f", r_mesh.time),
+		"solve_time_s" => @sprintf("%.3f", r_dpim.time),
+		"resonance_eigenvalues" => "imaginary_part_only", "resonance_tol_relative" => 0.05,
 		"mesh_h_cyl" => MESH_H_CYL, "mesh_h_wake" => MESH_H_WAKE,
 		"mesh_h_bulk" => MESH_H_BULK, "fast" => FAST])
 

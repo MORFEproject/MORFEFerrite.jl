@@ -50,6 +50,6 @@ export write_paraview_mesh, write_paraview_modes,
 # low-level example includes from `examples/common/results_io.jl`. Reach it as
 # `MORFEFerrite.save_rom` or `MORFEFerrite.StructuralSVK.save_rom`.
 export SVKMaterial, RayleighDamping, HarmonicForcing,
-	mechanical_model, parametrise, real_dynamics, print_equations
+	mechanical_model, real_dynamics, print_equations
 
 end # module MORFEFerrite

@@ -21,7 +21,7 @@ example driver:
 
 ```julia
 K_visc .*= -D
-h₀_vec  = -D .* (K_visc_rect * s₀_full)
+h₀_vec = -D .* (K_visc_rect * s₀_full)
 ```
 
 `D` is the cylinder diameter — the reference length in `ν = D/Re`, so the

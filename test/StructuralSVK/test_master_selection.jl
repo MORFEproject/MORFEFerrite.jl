@@ -9,6 +9,7 @@ using MORFEFerrite.StructuralSVK: svk_assemble_KM!, svk_nonlinearity
 using Ferrite, Arpack, LinearMaps
 using SparseArrays, LinearAlgebra, StaticArrays
 using Test
+include(joinpath(@__DIR__, "rom_pipeline.jl"))
 
 const SVKm = MORFEFerrite.StructuralSVK
 
@@ -100,7 +101,7 @@ end
 	beam = _sel_model()
 
 	for master in ([2], [1, 3])
-		rom = SVKm.parametrise(beam; master = master, order = 3,
+		rom = svk_build_rom(beam; master = master, order = 3,
 			nev = 10, resonance_tol_rel = 0.05)
 		R_ref, eigs_ref = _reference_rom(master, 3, 10)
 
@@ -122,9 +123,9 @@ end
 	# 0.05·|λ₁| is exactly the absolute threshold below — the two flavours must
 	# then produce the same ROM.
 	λ1 = SVKm.eigenfrequencies(beam; nev = 10)[1]
-	rom_abs = SVKm.parametrise(beam; master = [1], order = 3, nev = 10,
+	rom_abs = svk_build_rom(beam; master = [1], order = 3, nev = 10,
 		resonance_tol = 0.05 * abs(λ1))
-	rom_rel = SVKm.parametrise(beam; master = [1], order = 3, nev = 10,
+	rom_rel = svk_build_rom(beam; master = [1], order = 3, nev = 10,
 		resonance_tol_rel = 0.05)
 	dev = maximum(abs.(rom_abs.R.poly.coefficients .- rom_rel.R.poly.coefficients) ./
 				  max.(abs.(rom_abs.R.poly.coefficients), 1e-12))
@@ -136,14 +137,14 @@ end
 	beam = _sel_model()
 
 	ep = SVKm.spectrum(beam; nev = 10)
-	rom_a = SVKm.parametrise(beam; master = [1], order = 3, eigenproblem = ep)
-	rom_b = SVKm.parametrise(beam; master = [1], order = 3, eigenproblem = ep)
+	rom_a = svk_build_rom(beam; master = [1], order = 3, eigenproblem = ep)
+	rom_b = svk_build_rom(beam; master = [1], order = 3, eigenproblem = ep)
 	# Same spectrum in ⇒ bit-identical ROM out.
 	@test rom_a.R.poly.coefficients == rom_b.R.poly.coefficients
 	@test rom_a.info.eig_time_s < 1e-3   # no eigenproblem was solved
 
 	# …and it agrees with letting parametrise solve its own.
-	rom_own = SVKm.parametrise(beam; master = [1], order = 3, nev = 10)
+	rom_own = svk_build_rom(beam; master = [1], order = 3, nev = 10)
 	dev = maximum(abs.(rom_a.R.poly.coefficients .- rom_own.R.poly.coefficients) ./
 				  max.(abs.(rom_own.R.poly.coefficients), 1e-12))
 	@info "precomputed-vs-internal spectrum max rel dev = $dev"
@@ -152,17 +153,17 @@ end
 	# An eigenproblem too small for the requested masters is rejected (this one
 	# holds 4 physical modes; master = [8] needs 8).
 	small = SVKm.spectrum(beam; nev = 4)
-	@test_throws AssertionError SVKm.parametrise(beam; master = [8], order = 2,
+	@test_throws AssertionError svk_build_rom(beam; master = [8], order = 2,
 		eigenproblem = small)
 end
 
 @testset "master argument validation" begin
 	beam = _sel_model()
 
-	@test_throws AssertionError SVKm.parametrise(beam; master = [2, 2], order = 2)
-	@test_throws AssertionError SVKm.parametrise(beam; master = [3, 1], order = 2)
-	@test_throws AssertionError SVKm.parametrise(beam; master = [0], order = 2)
-	@test_throws AssertionError SVKm.parametrise(beam; master = [8], order = 2, nev = 4)
+	@test_throws AssertionError svk_build_rom(beam; master = [2, 2], order = 2)
+	@test_throws AssertionError svk_build_rom(beam; master = [3, 1], order = 2)
+	@test_throws AssertionError svk_build_rom(beam; master = [0], order = 2)
+	@test_throws AssertionError svk_build_rom(beam; master = [8], order = 2, nev = 4)
 end
 
 @testset "node → DOF lookups" begin

@@ -97,10 +97,10 @@ Project the lift weight vector onto the parametrisation, L_α = lᵀW_α (biline
 the adjoint would conjugate), serialise `lift_polynomial.jls`, and return the
 coefficient vector for the CSV export.
 """
-function export_lift_polynomial(out::IO, data_dir::AbstractString, rom, l_free, L0)
+function export_lift_polynomial(out::IO, data_dir::AbstractString, W, l_free, L0)
 	# The projection itself lives in FluidNavierStokes (observables.jl), next to
 	# write_energy_gram — this function is only the serialisation around it.
-	(L_coeffs, mset_l) = lift_polynomial(rom, l_free)
+	(L_coeffs, mset_l) = lift_polynomial(W, l_free)
 	serialize(joinpath(data_dir, "lift_polynomial.jls"),
 		(; L0 = L0, L_coeffs = L_coeffs, mset = mset_l))
 	@printf(out, "  Lift polynomial: L0 = %.6f, %d coefficients\n", L0, length(L_coeffs))

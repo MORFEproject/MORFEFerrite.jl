@@ -6,17 +6,22 @@ harmonic forcing.
     using MORFE, MORFEFerrite
     const SVK = MORFEFerrite.StructuralSVK
     beam = SVK.mechanical_model(mesh; material, damping, dirichlet, fe_order, quad_order)
-    rom  = SVK.parametrise(beam; master = [1], order = 9)
 
-`parametrise(::AssembledMechanicalModel; …)` extends `MORFE.parametrise`. The
-Ferrite SVK geometric nonlinearity factory is `svk_nonlinearity` and the linear
-stiffness/mass assembler is `svk_assemble_KM!` (a concrete `MORFE.FEMMultilinearMap`
-backend).
+    (; model, spectral, meta) = build_model(beam; master = [1], expansion_order = 9)
+    W, R = parametrise(model, spectral, 9;
+        resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
+    rom = SVK.InvariantManifoldROM(W, R, meta; master = [1], order = 9)
+
+**There is one `parametrise` and it is MORFE's.** This module contributes
+`build_model` — the single contract every physics backend implements — and the
+result container above; it does not wrap the reduction. The Ferrite SVK geometric
+nonlinearity factory is `svk_nonlinearity` and the linear stiffness/mass assembler
+is `svk_assemble_KM!` (a concrete `MORFE.FEMMultilinearMap` backend).
 """
 module StructuralSVK
 
 using MORFE
-import MORFE: parametrise, save_rom, spectrum
+import MORFE: save_rom, spectrum
 using Ferrite, FerriteGmsh, Arpack, LinearMaps
 using LinearAlgebra, SparseArrays, Serialization, Printf
 using StaticArrays
@@ -68,7 +73,7 @@ include("parametric_model.jl")
 export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
 	RayleighDamping, HarmonicForcing,
 	AssembledMechanicalModel, InvariantManifoldROM, RayleighEigensolver,
-	mechanical_model, parametrise, spectrum, eigenfrequencies, print_mode_table,
+	mechanical_model, spectrum, eigenfrequencies, print_mode_table,
 	resonances, print_resonances, real_dynamics, print_equations, save_rom,
 	svk_nonlinearity, svk_assemble_KM!,
 	SVKPullbackKernel, parametric_model, base_operators
