@@ -7,9 +7,7 @@ Solve the model's eigenproblem. Pass the result to `parametrise` as
 solve — and so that inspecting it cannot perturb the ROM.
 """
 function spectrum(m::AssembledMechanicalModel; nev::Int = 10, eigensolver = nothing)
-	solver = eigensolver === nothing ?
-			 RayleighEigensolver(nothing, nothing, nev,
-		Float64(m.damping.α), Float64(m.damping.β)) : eigensolver
+	solver = eigensolver === nothing ? RayleighEigensolver(nev, m.damping) : eigensolver
 	return solver isa StructureModalDampingEigensolver ?
 		   spectrum(m.K, m.M, solver; sorter! = (args...) -> nothing) :
 		   spectrum(

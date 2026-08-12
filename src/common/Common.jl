@@ -11,6 +11,7 @@ module Common
 using Ferrite
 
 include("assembled_model.jl")
+include("summary.jl")
 include("mesh_comsol.jl")
 include("dof_lookup.jl")
 include("paraview.jl")
@@ -18,6 +19,7 @@ include("paraview.jl")
 using .ParaviewExport
 
 export AbstractAssembledModel, build_model
+export write_summary, summary_entries, stage_timings
 export load_comsol_grid, node_dof, free_dofs_at_nodes
 export write_paraview_mesh, write_paraview_modes,
 	write_paraview_manifold, write_paraview_deformation

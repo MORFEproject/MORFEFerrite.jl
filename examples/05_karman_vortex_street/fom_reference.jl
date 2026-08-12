@@ -55,21 +55,27 @@ using MORFEFerrite.FluidNavierStokes
 include(joinpath(@__DIR__, "solver", "time_integration.jl"))
 include(joinpath(@__DIR__, "solver", "picard_orbit.jl"))
 
-const OPS_CACHE_VERSION = 2   # v2 = post-h₀-fix (rectangular free×ALL block)
+const OPS_CACHE_VERSION = 3   # v3 = operators built by FluidNavierStokes.fluid_model
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Operators: versioned cache per run directory
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
-	load_or_build_operators(data_dir, fom, re0) -> (; version, B₀, B₁, K_visc, h₀_vec, s₀_full)
+	load_or_build_operators(data_dir, meshfile, re0) -> (; version, B₀, B₁, K_visc, h₀_vec, s₀_full)
 
 Load `data_dir/linear_ops.jls` if it carries the current cache version; otherwise
-recompute (Newton base flow at `re0` + linear assembly, exactly as main.jl stages
-3–5) and overwrite the cache. Old caches from the pre-restructure pipeline lack
-the version field AND carry the buggy inlet-columns h₀ — they are never reused.
+build the operators with `FluidNavierStokes.fluid_model` and overwrite the cache.
+
+The construction is **not** repeated here. It used to be — Newton base flow,
+linear assembly, `assemble_K_visc` and the `−D` scaling, spelled out a second time
+alongside main.jl's copy, which meant the two had to be kept in step by hand. Now
+there is one construction and this only caches it.
+
+Caches written before v3 came from that duplicate path and are never reused.
 """
-function load_or_build_operators(data_dir::AbstractString, fom, re0::Float64)
+function load_or_build_operators(data_dir::AbstractString, meshfile::AbstractString,
+		re0::Float64)
 	path = joinpath(data_dir, "linear_ops.jls")
 	if isfile(path)
 		ops = deserialize(path)
@@ -77,17 +83,13 @@ function load_or_build_operators(data_dir::AbstractString, fom, re0::Float64)
 			@info "Loaded cached operators from $path"
 			return ops
 		end
-		@info "Stale linear_ops.jls (pre-h₀-fix cache) — recomputing"
+		@info "Stale linear_ops.jls (built by the pre-fluid_model path) — recomputing"
 	end
 
-	@info "Computing operators (Newton base flow at Re₀ = $re0 + linear assembly) ..."
-	(_, _, s₀_full) = solve_steady_state(fom; Re0 = re0)
-	B₀, B₁ = assemble_linear_operators(s₀_full, fom; Re0 = re0)
-	(K_visc, _K_visc_rect) = assemble_K_visc(fom)
-	K_visc .*= -_CYL_D
-	h₀_vec = -_CYL_D .* (_K_visc_rect * s₀_full)   # rectangular free×ALL block × FULL base flow
-
-	ops = (; version = OPS_CACHE_VERSION, B₀, B₁, K_visc, h₀_vec, s₀_full)
+	@info "Building operators via fluid_model (Newton base flow at Re₀ = $re0) ..."
+	case = fluid_model(meshfile; Re = re0)
+	ops = (; version = OPS_CACHE_VERSION, B₀ = case.B₀, B₁ = case.B₁,
+		K_visc = case.K_visc, h₀_vec = case.h₀_vec, s₀_full = case.s₀_full)
 	serialize(path, ops)
 	@info "Cached operators to $path"
 	return ops
@@ -302,7 +304,7 @@ function process_dir(run_dir::AbstractString, fom, l_free, M_vel, vel_rows, area
 	@printf("  seeding from rom_branch_ord%d.csv  (%d points, Re %.3f → %.3f)\n",
 		branch_ord, size(branch, 1), branch[1, 2], branch[end, 2])
 
-	ops = load_or_build_operators(data_dir, fom, re0)
+	ops = load_or_build_operators(data_dir, meshfile, re0)
 	L0_lift = dot(l_free, ops.s₀_full[fom.free_dpim])
 
 	s_steady_warm = ops.s₀_full   # continuation chain for the steady branch

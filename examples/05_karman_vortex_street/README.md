@@ -99,7 +99,6 @@ results/
 | `fom_reference.jl` | Step 4 — FOM periodic-orbit reference per Re in FOM_REF_RE |
 | `config.jl` | All parameters (Re₀, MAX_ORD, TRUNC_ORDERS, mesh, eigensolver, branch) |
 | `fem/mesh.jl` | Gmsh channel-with-cylinder mesh generation (example-local; needs Gmsh) |
-| `solver/eigensolver.jl` | Shift-invert ARPACK Hopf eigensolver |
 | `solver/rom_palc.jl` | Pseudo-arclength continuation toolkit for the ROM branch |
 | `solver/time_integration.jl` | IMEX θ-method FOM integrator (perturbation NSE) |
 | `solver/picard_orbit.jl` | ROM-seeded Picard iteration for FOM periodic orbits |
@@ -108,13 +107,25 @@ results/
 | `validation/validate_tke.jl` | Independent FOM-space TKE check |
 | `validation/generate_matlab.py` | Optional matcont/COCO export (`EXPORT_MATLAB = true`) |
 
-The fluid FEM layer itself lives in the package as
-[`MORFEFerrite.FluidNavierStokes`](../../src/FluidNavierStokes/)
-(`setup_fem`, `solve_steady_state`, `assemble_linear_operators`,
-`FluidConvection`/`make_param_coupling`/`make_base_forcing`, energy-Gram and
-lift helpers) — the driver imports it instead of carrying its own
-`fem/{fem_setup,linear_operators,fluid_maps,energy_gram}.jl` +
-`solver/steady_state.jl`.
+The whole **mesh → ROM** path lives in the package as
+[`MORFEFerrite.FluidNavierStokes`](../../src/FluidNavierStokes/), so `main.jl` is
+two calls plus narration:
+
+```julia
+case = fluid_model(meshfile; Re = Re₀)      # FEM setup, Newton base flow,
+                                            # linearised operators, η′ coupling
+rom  = parametrise(case; order = MAX_ORD)   # Hopf eigenproblem, model,
+                                            # SpectralData, cohomological solve
+```
+
+`fluid_model` also applies the `−D` scaling of `K_visc`/`h₀` that the driver used
+to do by hand, and `parametrise` names the resonance policy
+(`resonance_eigenvalues = :imaginary_part_only` — detection on frequency alone)
+and the mode gauge (`scale`, `normalisation`) that were previously inline
+constants. `solve_hopf_eigenproblem` moved into the module too, which is why
+`solver/eigensolver.jl` is gone.
+
+Only **mesh generation** stays example-local: it is problem geometry, not physics.
 
 ## Validation
 

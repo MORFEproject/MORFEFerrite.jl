@@ -73,7 +73,7 @@ const _order = 3
 	model = NthOrderModel((K, C, M), (term_quad, term_cubic))
 
 	eigenproblem = spectrum(model,
-		solver = SVK.RayleighEigensolver(nothing, nothing, 10, _α, _β),
+		solver = SVK.RayleighEigensolver(10, SVK.RayleighDamping(α = _α, β = _β)),
 		sorter! = (args...) -> nothing)
 	eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes, eigenproblem.left_eigenmodes
 	master_eigenvalues = SVector{ROM, ComplexF64}(eigenvalues[1:ROM])

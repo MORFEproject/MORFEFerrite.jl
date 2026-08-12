@@ -20,8 +20,15 @@ isfile(fresh) || error("No fresh results at $fresh — run main.jl first.")
 # Arpack eigenvector gauge differs), so compare the eigenvalue row, the rows
 # linear in the external parameter η′, and the Im/Re ratio of the leading
 # nonlinear term — all invariant under z → e^{iφ}z.
+#
+# `n_master = ROM` is REQUIRED, not decoration. It defaults to the full column
+# count, which would count η′ as a modal coordinate: "modal degree 1" would then
+# select the pure-η′ row instead of λ and c₁₀₁, and the "purely modal nonlinear"
+# filter `sum(exponents[nm+1:end]) == 0` would sum an EMPTY range — true for
+# every row — so the Im/Re check would land on whichever degree-2 row sorted
+# first rather than on c₂₁₀.
 pass, dev, report = MORFE.compare_rom_coefficients(fresh, reference;
-	mode = :gauge_invariant, rtol = 1e-6)
+	mode = :gauge_invariant, rtol = 1e-6, n_master = ROM)
 println(report)
 pass || error("Example 05 deviates from its reference (max rel dev $dev).")
 println("Example 05 validation passed (gauge-invariant).")

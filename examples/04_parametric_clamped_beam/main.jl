@@ -1,9 +1,14 @@
 # # Parametric structural ROM — generic pipeline
 #
 # Computes a geometrically parametric invariant-manifold ROM with
-# `MORFEFerrite.ParametricStructural`: the reference map is additive,
+# `MORFEFerrite.ParametricGeometry`: the reference map is additive,
 # `x(θ,x₀) = x₀ + Σᵢ θᵢ ψᵢ(x₀)`, each parameter θᵢ scaling an independent
 # shape field, with per-parameter (multiindex-box) θ-series truncation.
+#
+# The model assembly lives in the module, not here: `parametric_model` expands
+# an SVK structure over the coordinate transform, and `build_model` produces the
+# augmented `NthOrderModel`, the reconciled `SpectralData` and the derived
+# conjugate permutation. This file only states the CASE and the reduction.
 #
 # **Everything problem-specific lives in `config.jl`** (mesh, material, shape
 # fields, orders, bases, providers). This file is the generic pipeline — it is
@@ -38,7 +43,7 @@ Pkg.instantiate()
 using MORFE, MORFEFerrite
 using Ferrite, FerriteGmsh, Arpack, LinearMaps
 using SparseArrays, LinearAlgebra, Printf, Tensors, StaticArrays
-const PS = MORFEFerrite.ParametricStructural
+const PG = MORFEFerrite.ParametricGeometry
 const SVK = MORFEFerrite.StructuralSVK
 const Tens3 = Tensor{2, 3, Float64, 9}
 
@@ -59,79 +64,31 @@ add!(ch, Dirichlet(:u, getfacetset(grid, "Dirichlet"), (x, t) -> zeros(3), [1, 2
 close!(ch);
 update!(ch, 0.0)
 free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
-free_to_local = Dict(d => i for (i, d) in enumerate(free))
 n_free = length(free)
 println("Total DOFs: ", ndofs(dh), "   free: ", n_free)
 
-# ## Base operators and eigenproblem (θ = 0 configuration)
-K0_full, M0_full = BASE_KM(dh, cv)
-K_ref = K0_full[free, free];
-M_ref = M0_full[free, free]
-solver_eig = StructureModalDampingEigensolver(NEV, ALPHA, BETA)
-eigenproblem = spectrum(K_ref, M_ref, solver_eig; sorter! = (args...) -> nothing)
-eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes, eigenproblem.left_eigenmodes
-master_eigenvalues = SVector{ROM, ComplexF64}(eigenvalues[1:ROM])
-master_modes = Y[:, 1, 1:ROM]
-left_eigenmodes = X[:, 1:ROM]
-master_modes_derivatives = zeros(ComplexF64, n_free, 2, ROM)
-for r in 1:ROM
-	master_modes_derivatives[:, 1, r] .= Y[:, 2, r]
-	master_modes_derivatives[:, 2, r] .= master_eigenvalues[r] .* Y[:, 2, r]
-end
-println("master eigenvalues: ", collect(master_eigenvalues))
+# ## The assembled parametric case and its base eigenproblem.
+# `BUILD_CASE` owns the ordering the problem needs: example 04's shape field is
+# built FROM the first bending mode, so it eigensolves first; example 07's
+# geometry is analytic, so it assembles first and reads the θ⁰ operators back.
+pcase, eigenproblem = BUILD_CASE(dh, cv, free)
+println("master eigenvalues: ", collect(eigenproblem.eigenvalues[1:ROM]))
+RUN_SANITY_CHECKS && SANITY(pcase, eigenproblem)
+display(pcase)
 
-# ## Shape-field geometry provider (analytic, or built from the eigen data)
-provider = GEOM_BUILDER(dh, free, master_modes, ndofs(dh))
+# ## Augmented model, spectral data and conjugate permutation — all derived.
+(; model, spectral, meta) = build_model(pcase; master = [1], spectrum = eigenproblem)
+println("\nORD = $(meta.ORD),  N_EXT = $(meta.N_EXT),  nonlinear terms = $(meta.n_terms)")
+println("conjugate permutation: ", meta.conjugate_permutation)
 
-# ## Parametric stiffness/mass coefficient matrices over the θ box
-K_arr, M_arr = PARAM_KM(dh, cv, provider, free)
-K = K_arr[1];
-M = M_arr[1];
-C = ALPHA * M + BETA * K
-RUN_SANITY_CHECKS && SANITY(K_arr, M_arr, K_ref, master_eigenvalues, master_modes)
-
-# ## Parametric nonlinear maps and linear K/C/M corrections
-pgn_quad = PS.ParametricGeometricNonlinearity{2}(dh, cv, LAMBDA_LAME, MU_LAME,
-	provider, free_to_local, n_free, BASIS_QUAD)
-pgn_cube = PS.ParametricGeometricNonlinearity{3}(dh, cv, LAMBDA_LAME, MU_LAME,
-	provider, free_to_local, n_free, BASIS_CUBIC)
-quad_maps = PS.multilinear_maps(pgn_quad)
-cube_maps = PS.multilinear_maps(pgn_cube)
-K_corrections = PS.build_K_corrections(K_arr, BASIS_K)
-C_corrections = PS.build_C_corrections(K_arr, M_arr, ALPHA, BETA, BASIS_K)
-M_corrections = PS.build_M_corrections(M_arr, BASIS_K)
-println("maps: quad=$(length(quad_maps)) cube=$(length(cube_maps)) ",
-	"Kcorr=$(length(K_corrections)) Ccorr=$(length(C_corrections)) Mcorr=$(length(M_corrections))")
-
-# ## Augmented model, multiindex set, and the cohomological solve
-ext_sys = ExternalSystem(ntuple(_ -> complex(0.0, 0.0), N_EXT))
-ZERO = spzeros(eltype(K), n_free, n_free)
-model = NthOrderModel((K, C, M, ZERO),
-	(quad_maps..., cube_maps...,
-		K_corrections..., C_corrections..., M_corrections...),
-	ext_sys)
+# ## The reduction. The monomial set is the CALLER's choice — `build_model`
+# deliberately does not pick one, because the θ-box truncation is a modelling
+# decision, not a property of the assembled model.
 mset = BUILD_MSET()
 println("monomials: ", length(mset))
-## The resonance policy is stated explicitly: complex-normal-form style over the
-## master eigenvalues with the frozen external states; outer (non-master) modes
-## are deliberately not added as resonance targets.
-resonance_set = resonance_set_from_complex_normal_form_style(
-	mset, Vector{ComplexF64}(master_eigenvalues), 0.05;
-	external_eigenvalues = zeros(ComplexF64, N_EXT))
-left_modes_derivatives = left_eigenmode_orders_from_slice(
-	model.linear_terms, left_eigenmodes, collect(master_eigenvalues))[:, 1:(end-1), :]
-
-## One spectral object carries the master eigenvalues and both sets of order-blocks;
-## `SpectralData` applies the mirrored right/left convention. The ROM-length master
-## pairing is not stated here because PERMUTATION spans the external states too, so it
-## goes to the solve, which uses it verbatim.
-spectral = SpectralData(; eigenvalues = master_eigenvalues,
-	right_modes = master_modes, right_derivatives = master_modes_derivatives,
-	left_modes = left_eigenmodes, left_blocks = Array(left_modes_derivatives))
-
 @time (W, R) = parametrise(model, spectral, mset;
-	resonance = resonance_set,
-	conjugate_permutation = PERMUTATION)
+	resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05),
+	conjugate_permutation = meta.conjugate_permutation)
 
 # ## Save the standard result layout (data/{W.jls, R.jls, R_coefficients.csv})
 MORFE.save_rom(joinpath(@__DIR__, "results"), W, R; metadata = META())

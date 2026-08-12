@@ -77,10 +77,24 @@ function Base.show(io::IO, ::MIME"text/plain", m::AssembledMechanicalModel)
 end
 
 """
-Invariant-manifold ROM returned by `parametrise`. Fields: `W` (parametrisation),
-`R` (reduced dynamics), `eigenvalues`, `master` (mode pairs), `order`,
-`forcing` (a `Vector{<:HarmonicForcing}`, empty when autonomous), `info`
-(NamedTuple, whose `Ω` is the matching vector of forcing frequencies).
+Invariant-manifold ROM for an SVK structure: `W` (parametrisation), `R` (reduced
+dynamics), `eigenvalues`, `master` (mode pairs), `order`, `forcing` (a
+`Vector{<:HarmonicForcing}`, empty when autonomous), and `info` (a NamedTuple whose
+`Ω` is the matching vector of forcing frequencies).
+
+A **result container, not an entry point.** There is one `parametrise` and it is
+MORFE's; this packages its output together with the physics metadata that
+`real_dynamics`, `print_equations` and `save_rom` need — `master` and `N_EXT` in
+particular, which cannot be recovered from `W` and `R` alone.
+
+Build it from `build_model`'s `meta`:
+
+```julia
+(; model, spectral, meta) = build_model(case; master = [1], expansion_order = order)
+W, R = parametrise(model, spectral, order;
+                   resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
+rom = InvariantManifoldROM(W, R, meta; master = [1], order = order)
+```
 """
 struct InvariantManifoldROM{TW, TR, T, FRC}
     W::TW
@@ -91,6 +105,44 @@ struct InvariantManifoldROM{TW, TR, T, FRC}
     forcing::FRC
     info::NamedTuple
 end
+
+"""
+	InvariantManifoldROM(W, R, meta; master, order, info = (;))
+
+Package a solve against the `meta` that [`build_model`](@ref) returned. Pulls the
+spectrum, the forcing records, `N_EXT` and the timings from `meta`; `info` merges
+extra rows on top (a caller's own `solve_time_s`, say).
+"""
+function InvariantManifoldROM(W, R, meta::NamedTuple; master::Vector{Int}, order::Int,
+        info::NamedTuple = (;))
+    base = (; N_EXT = meta.N_EXT, Ω = meta.Ω, eig_time_s = meta.eig_time_s)
+    merged = haskey(meta, :case_info) ? (; meta.case_info..., base..., info...) :
+             (; base..., info...)
+    return InvariantManifoldROM(W, R, collect(meta.spectrum.eigenvalues), master, order,
+        meta.forcings, merged)
+end
+
+# The rows only this physics has; the shared skeleton (sizes, order, stage
+# timings) comes from Common.write_summary.
+function Common.summary_entries(m::AssembledMechanicalModel, rom::InvariantManifoldROM)
+    rows = Pair{String, Any}[
+        "model" => "geometrically nonlinear structure (St. Venant-Kirchhoff)",
+        "material" => _material_summary(m.material),
+        "damping" => "Rayleigh  α=$(m.damping.α)  β=$(m.damping.β)",
+        "master_pairs" => rom.master,
+        "master_eigenvalues" => rom.eigenvalues[reduce(
+            vcat, [[2p - 1, 2p] for p in rom.master])],
+        "n_monomials" => rom.info.n_monomials,
+    ]
+    isempty(rom.forcing) ? push!(rows, "forcing" => "none (autonomous)") :
+    push!(rows, "forcing" => join(["mode $(f.mode) a=$(f.amplitude) Ω=$Ω"
+                                   for (f, Ω) in zip(rom.forcing, rom.info.Ω)], "; "))
+    return rows
+end
+
+Common.summary_entries(m::AssembledMechanicalModel, ::Nothing) =
+    Pair{String, Any}["model" => "geometrically nonlinear structure (St. Venant-Kirchhoff)",
+        "material" => _material_summary(m.material)]
 
 function Base.show(io::IO, ::MIME"text/plain", rom::InvariantManifoldROM)
     ROM = 2 * length(rom.master)

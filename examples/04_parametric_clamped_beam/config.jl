@@ -13,24 +13,31 @@ FAST = get(ENV, "MORFE_FAST", "0") == "1"
 # Geometry / mesh / material -------------------------------------------------
 MESH = joinpath(@__DIR__, "beam_h27_10x2x2.msh")
 E = 160e3; ν = 0.22; RHO = 2.32e-3
-LAMBDA_LAME = (E * ν) / ((1 + ν) * (1 - 2ν))
-MU_LAME = E / (2(1 + ν))
 ALPHA = 0.0; BETA = 0.0
 NEV = 10
 
 # Reduction -------------------------------------------------------------------
+# No PERMUTATION literal: `build_model` derives it with
+# `full_conjugate_permutation`, so it stays correct if the external system
+# changes. It came out as [2, 1, 3, 4] here — z₁ ↔ z₂, θ₁/θ₂ real hence
+# self-conjugate — and main.jl prints it.
 ROM = 2                             # master conjugate pair
 N_EXT = 2                           # two frozen external states: θ₁, θ₂
 NVAR = ROM + N_EXT
-PERMUTATION = [2, 1, 3, 4]          # z₁ ↔ z₂; θ₁, θ₂ real → self-conjugate
 MAXZ = FAST ? 3 : 9                 # expansion order in (z₁, z₂)
 MAXT = FAST ? 2 : 4                 # per-parameter θ box bound
 RUN_SANITY_CHECKS = true
 
-# θ-series bases: one per-parameter box [MAXT, MAXT] for all forms.
-BASIS_K = PS.ThetaBasis([MAXT, MAXT])
+# θ-series bases: one per-parameter box [MAXT, MAXT] for all forms. Sharing ONE
+# object is how a caller says "same truncation" — `parametric_model` then builds
+# a single geometry cache instead of three.
+BASIS_K = PG.GeometryParameterBasis([MAXT, MAXT])
 BASIS_QUAD = BASIS_K
 BASIS_CUBIC = BASIS_K
+GEOMETRY_PARAMETER_BASES = (; linear = BASIS_K, quadratic = BASIS_QUAD, cubic = BASIS_CUBIC)
+
+MATERIAL = SVKMaterial(E = E, ν = ν, ρ = RHO)
+DAMPING = RayleighDamping(α = ALPHA, β = BETA)
 
 # Shape-field geometry: ψ₁ analytic (constant gradient), ψ₂ built from the
 # first bending eigenmode — the provider needs element/QP context (4-arg form).
@@ -56,28 +63,30 @@ function GEOM_BUILDER(dh, free, master_modes, ndofs_total)
 	return BeamParametricGeom(∇ψ₁, φ_full, zeros(Float64, ndofs_per_cell(dh)))
 end
 
-# Base operators for the eigenproblem: at θ = 0 the reference is the straight
-# beam (J = I), so K₀/M₀ are the standard isotropic SVK assembly.
-function BASE_KM(dh, cv)
+# The shape field ψ₂ is built FROM the first bending mode, so the eigenproblem
+# comes first: assemble the straight beam (θ = 0 reference, J = I) with the
+# standard SVK kernels, solve, build the provider, then expand parametrically.
+function BUILD_CASE(dh, cv, free)
 	K0 = allocate_matrix(dh)
 	M0 = allocate_matrix(dh)
-	SVK.svk_assemble_KM!(K0, M0, dh, cv, LAMBDA_LAME, MU_LAME, RHO)
-	return K0, M0
-end
-function PARAM_KM(dh, cv, provider, free)
-	K_full = [allocate_matrix(dh) for _ in 1:PS.nterms(BASIS_K)]
-	M_full = [allocate_matrix(dh) for _ in 1:PS.nterms(BASIS_K)]
-	PS.assemble_parametric_K_M!(K_full, M_full, dh, cv,
-		LAMBDA_LAME, MU_LAME, RHO, provider, BASIS_K)
-	return [Kf[free, free] for Kf in K_full], [Mf[free, free] for Mf in M_full]
+	SVK.svk_assemble_KM!(K0, M0, dh, cv, MATERIAL)
+	eigenproblem = spectrum(K0[free, free], M0[free, free],
+		StructureModalDampingEigensolver(NEV, ALPHA, BETA);
+		sorter! = (args...) -> nothing)
+	provider = GEOM_BUILDER(dh, free, eigenproblem.eigenmodes[:, 1, 1:ROM], ndofs(dh))
+	pcase = SVK.parametric_model(dh, cv, provider;
+		geometry_parameter_basis = GEOMETRY_PARAMETER_BASES, material = MATERIAL, damping = DAMPING, free = free)
+	return pcase, eigenproblem
 end
 
 # Pre-solve sanity: θ⁰ coefficient ≡ SVK assembly (exact) and the analytic
 # frequency sensitivities ∂ω/∂θ₁ ≈ −2ω₀ (stretch), ∂ω/∂θ₂ ≈ 0 (bending arch).
-function SANITY(K_arr, M_arr, K_ref, master_eigenvalues, master_modes)
+function SANITY(pcase, eigenproblem)
+	K_arr = pcase.operators[1].arrays
+	M_arr = pcase.operators[3].arrays
+	master_eigenvalues = eigenproblem.eigenvalues[1:ROM]
+	master_modes = eigenproblem.eigenmodes[:, 1, 1:ROM]
 	M = M_arr[1]
-	dev = maximum(abs.(K_arr[1] - K_ref))
-	@printf "sanity: ‖K_θ⁰ − K_svk‖_max = %.3e  (expect ~1e-12)\n" dev
 	i10 = BASIS_K.index[SVector(1, 0)]
 	i01 = BASIS_K.index[SVector(0, 1)]
 	φ = real(master_modes[:, 1]); φ ./= maximum(abs, φ)

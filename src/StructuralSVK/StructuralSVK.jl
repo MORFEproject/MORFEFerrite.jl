@@ -20,8 +20,8 @@ import MORFE: parametrise, save_rom, spectrum
 using Ferrite, FerriteGmsh, Arpack, LinearMaps
 using LinearAlgebra, SparseArrays, Serialization, Printf
 using StaticArrays
-using ..Common: load_comsol_grid, AbstractAssembledModel
-import ..Common: build_model
+using ..Common: load_comsol_grid, AbstractAssembledModel, Common
+import ..Common: build_model, summary_entries
 
 # Ferrite SVK backend: FerriteGeometricNonlinearity <: MORFE.FEMMultilinearMap{2}
 # and the linear assemble_KM!.
@@ -56,14 +56,21 @@ svk_assemble_KM!(K, M, dh, cv, material::Union{SVKMaterial, AnisotropicMaterial}
 	assemble_KM!(K, M, dh, cv, stress_model(material), Float64(material.ρ))
 include("rayleigh_solver.jl")
 include("mechanical_model.jl")
+include("build_model.jl")
 include("parametrise.jl")
 include("postprocess.jl")
+
+# SVK's implementation of the ParametricGeometry kernel interface, and the entry
+# point that expands an SVK structure over a parametric coordinate transform.
+include("pullback_kernel.jl")
+include("parametric_model.jl")
 
 export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
 	RayleighDamping, HarmonicForcing,
 	AssembledMechanicalModel, InvariantManifoldROM, RayleighEigensolver,
 	mechanical_model, parametrise, spectrum, eigenfrequencies, print_mode_table,
 	resonances, print_resonances, real_dynamics, print_equations, save_rom,
-	svk_nonlinearity, svk_assemble_KM!
+	svk_nonlinearity, svk_assemble_KM!,
+	SVKPullbackKernel, parametric_model, base_operators
 
 end # module StructuralSVK

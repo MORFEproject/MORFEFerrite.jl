@@ -21,22 +21,22 @@ using StaticArrays: SVector
 using MORFE: MultiindexSet, all_multiindices_in_box
 
 const Tens3 = Tensor{2, 3, Float64, 9}
-const _THETA_ZERO_TOL = 1e-15
+const _GEOMETRY_PARAMETER_ZERO_TOL = 1e-15
 
 """
-	ThetaBasis{Nθ}
+	GeometryParameterBasis{Nθ}
 
 Per-parameter box of θ-exponents (a MORFE `MultiindexSet`) plus an
 exponent→position lookup. Position 1 is always the zero multiindex
 (graded-lex order), i.e. the constant term.
 """
-struct ThetaBasis{Nθ}
+struct GeometryParameterBasis{Nθ}
 	mset::MultiindexSet{Nθ}
 	index::Dict{SVector{Nθ, Int}, Int}
 	prod::Vector{NTuple{3, Int}}   # (i,j,k): exps[i]+exps[j] = exps[k], k in box
 end
 
-function ThetaBasis(bounds::AbstractVector{<:Integer})
+function GeometryParameterBasis(bounds::AbstractVector{<:Integer})
 	mset = all_multiindices_in_box(collect(Int, bounds))
 	exps = mset.exponents
 	index = Dict(e => i for (i, e) in enumerate(exps))
@@ -48,17 +48,17 @@ function ThetaBasis(bounds::AbstractVector{<:Integer})
 		k = get(index, exps[i] + exps[j], 0)
 		k == 0 || push!(prod, (i, j, k))
 	end
-	return ThetaBasis{length(bounds)}(mset, index, prod)
+	return GeometryParameterBasis{length(bounds)}(mset, index, prod)
 end
 
-nterms(b::ThetaBasis) = length(b.mset.exponents)
+nterms(b::GeometryParameterBasis) = length(b.mset.exponents)
 
 # ---------------------------------------------------------------------
 # Truncated multivariate products
 # ---------------------------------------------------------------------
 # C[γ] = Σ_{α+β=γ, α,β,γ ∈ box} op(A[α], B[β]).  `op` is *, ⋅ or ⊡.
 @inline function _series_convolve(op, A::AbstractVector, B::AbstractVector,
-	basis::ThetaBasis)
+	basis::GeometryParameterBasis)
 	R = typeof(op(A[1], B[1]))
 	out = fill(zero(R), length(basis.mset.exponents))
 	@inbounds for (i, j, k) in basis.prod
@@ -68,9 +68,9 @@ nterms(b::ThetaBasis) = length(b.mset.exponents)
 	return out
 end
 
-poly_mul(A, B, basis::ThetaBasis) = _series_convolve(*, A, B, basis)
-poly_dot(A, B, basis::ThetaBasis) = _series_convolve(⋅, A, B, basis)
-poly_contract(A, B, basis::ThetaBasis) = _series_convolve(⊡, A, B, basis)
+poly_mul(A, B, basis::GeometryParameterBasis) = _series_convolve(*, A, B, basis)
+poly_dot(A, B, basis::GeometryParameterBasis) = _series_convolve(⋅, A, B, basis)
+poly_contract(A, B, basis::GeometryParameterBasis) = _series_convolve(⊡, A, B, basis)
 
 # Elementwise (same-basis) add / subtract / scale.
 padd(A, B) = A .+ B
@@ -86,10 +86,10 @@ Coefficients of `1/p(θ)` truncated to the box, from the graded recurrence
 `q[0] = 1/p[0]`, `q[γ] = -(1/p[0]) Σ_{0≠β≤γ} p[β] q[γ-β]`. Graded-lex order
 makes each `q[γ-β]` (lower total degree) available before `q[γ]`.
 """
-function reciprocal_series(p::AbstractVector{<:Real}, basis::ThetaBasis{Nθ}) where {Nθ}
+function reciprocal_series(p::AbstractVector{<:Real}, basis::GeometryParameterBasis{Nθ}) where {Nθ}
 	exps = basis.mset.exponents
 	L = length(exps)
-	abs(p[1]) > _THETA_ZERO_TOL || error("reciprocal_series: p(0) = 0, series undefined")
+	abs(p[1]) > _GEOMETRY_PARAMETER_ZERO_TOL || error("reciprocal_series: p(0) = 0, series undefined")
 	inv_p0 = 1.0 / p[1]
 	q = zeros(Float64, L)
 	q[1] = inv_p0
@@ -114,7 +114,7 @@ end
 
 `n`-th power of the reciprocal series (`n ≥ 1`), truncated to the box.
 """
-function inv_det_power(inv_det::AbstractVector{<:Real}, n::Int, basis::ThetaBasis)
+function inv_det_power(inv_det::AbstractVector{<:Real}, n::Int, basis::GeometryParameterBasis)
 	@assert n ≥ 1
 	acc = copy(inv_det)
 	for _ in 2:n
@@ -133,7 +133,7 @@ Assemble the degree-1 Jacobian series aligned to `basis` from
 `Js = (J₀, ∇ψ₁, …, ∇ψ_{Nθ})`: `J₀` at the zero multiindex, `∇ψ_i` at the
 unit multiindex `e_i`. All other coefficients are zero.
 """
-function jacobian_series(Js::NTuple{M, Tens3}, basis::ThetaBasis{Nθ}) where {M, Nθ}
+function jacobian_series(Js::NTuple{M, Tens3}, basis::GeometryParameterBasis{Nθ}) where {M, Nθ}
 	@assert M == Nθ + 1 "expected J₀ plus one ∇ψ per parameter (got $M for $Nθ params)"
 	L = nterms(basis)
 	J = fill(zero(Tens3), L)
@@ -156,7 +156,7 @@ Exact multivariate coefficients of `det(J(θ))` (scalar series) and
 standard 3×3 cofactor formulas evaluated with multivariate polynomial
 arithmetic. General for any number of parameters.
 """
-function det_adj_series(J::AbstractVector{Tens3}, basis::ThetaBasis)
+function det_adj_series(J::AbstractVector{Tens3}, basis::GeometryParameterBasis)
 	E = [_entry(J, i, j) for i in 1:3, j in 1:3]   # 3×3 of scalar series
 	m(a, b) = poly_mul(a, b, basis)
 

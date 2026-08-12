@@ -70,7 +70,7 @@ function _reference_rom(master::Vector{Int}, order::Int, nev::Int)
 	model = NthOrderModel((K, C, M), terms)
 
 	eigenproblem = spectrum(model,
-		solver = SVKm.RayleighEigensolver(nothing, nothing, nev, _sα, _sβ),
+		solver = SVKm.RayleighEigensolver(nev, SVKm.RayleighDamping(α = _sα, β = _sβ)),
 		sorter! = (args...) -> nothing)
 	eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes, eigenproblem.left_eigenmodes
 

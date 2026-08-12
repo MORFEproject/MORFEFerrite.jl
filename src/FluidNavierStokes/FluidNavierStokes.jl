@@ -21,6 +21,8 @@ using MORFE
 using Ferrite, FerriteGmsh
 using LinearAlgebra, SparseArrays, DelimitedFiles
 using KLU
+using ..Common: AbstractAssembledModel, Common
+import ..Common: build_model, summary_entries
 
 # Include order mirrors the Kármán driver (steady state feeds the linearisation).
 include("fem_setup.jl")
@@ -28,6 +30,15 @@ include("steady_state.jl")
 include("linear_operators.jl")
 include("fluid_maps.jl")
 include("energy_gram.jl")
+include("eigensolver.jl")
+
+# The "mesh → ROM" layer. There is deliberately no `parametrise` here: the only
+# `parametrise` is MORFE's, and a caller reduces with
+# `parametrise(model, spectral, order_or_mset; resonance = ResonanceConfig(...))`.
+include("types.jl")
+include("fluid_model.jl")
+include("build_model.jl")
+include("observables.jl")
 
 export setup_fem, U_MEAN, U_MAX
 export solve_steady_state, assemble_steady_nse!, compute_drag_lift
@@ -35,5 +46,9 @@ export assemble_linear_operators, check_linearisation, compute_pressure_lift_wei
 export FluidConvection, make_param_coupling, make_base_forcing, assemble_K_visc
 export velocity_dof_mask, assemble_velocity_mass_full, domain_area,
 	prepare_energy_gram, write_energy_gram
+export solve_hopf_eigenproblem, AbstractModeNormalisation,
+	SymmetricBiorthogonal, LeftBiorthogonal, NoNormalisation
+export AssembledFluidModel, fluid_model, build_model
+export lift_functional, lift_polynomial
 
 end # module FluidNavierStokes

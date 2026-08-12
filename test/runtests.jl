@@ -10,4 +10,14 @@ using Test
         include("StructuralSVK/test_anisotropic.jl")
         include("StructuralSVK/test_master_selection.jl")
     end
+
+    # The physics-blind parametric coordinate transform, gated three ways:
+    # against non-parametric StructuralSVK at J = I (a path that never goes
+    # through ParametricGeometry at all), against golden values for the curved-J₀
+    # and per-form-basis regimes, and on the build_model contract itself.
+    @testset "ParametricGeometry" begin
+        include("ParametricGeometry/test_kernel_equivalence.jl")
+        include("ParametricGeometry/test_kernel_golden.jl")
+        include("ParametricGeometry/test_build_model.jl")
+    end
 end

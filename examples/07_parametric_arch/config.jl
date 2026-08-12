@@ -14,49 +14,53 @@ MESH = joinpath(@__DIR__, "beam_h27_10x2x2.msh")
 const L_SPAN = 1000.0               # beam span (mm)
 const H0 = h0_L_ratio * L_SPAN      # arch rise (mm)
 E = 160e3; ν = 0.22; RHO = 2.32e-3
-LAMBDA_LAME = (E * ν) / ((1 + ν) * (1 - 2ν))
-MU_LAME = E / (2(1 + ν))
 ALPHA = 0.0; BETA = 0.0             # Rayleigh damping (conservative arch)
 NEV = 10
 
 # Reduction -------------------------------------------------------------------
+# No PERMUTATION literal: `build_model` derives it with
+# `full_conjugate_permutation`, which is the only way to express an ODD N_EXT —
+# θ is real, hence its own conjugate, so the adjacent-pairs formula cannot.
+# It comes out as [2, 1, 3] here, and main.jl prints it.
 ROM = 2                             # master conjugate pair
 N_EXT = 1                           # one frozen external state: θ
 NVAR = ROM + N_EXT
-PERMUTATION = [2, 1, 3]             # z₁ ↔ z₂; θ real → self-conjugate
 MAXZ = FAST ? 5 : 11                # expansion order in (z₁, z₂)
 MAXT = FAST ? 3 : 7                 # expansion order in θ
 RUN_SANITY_CHECKS = false
 
 # θ-series bases (exact polynomial degrees of the arch forms:
 # K(θ) ≤ 2, quadratic form ≤ 3, cubic form ≤ 4 — J_arch² = 0, det J ≡ 1).
-BASIS_K = PS.ThetaBasis([2])
-BASIS_QUAD = PS.ThetaBasis([3])
-BASIS_CUBIC = PS.ThetaBasis([4])
+# Three DISTINCT bases, so `parametric_model` builds three geometry caches —
+# truncating them all at the largest would be wasted work.
+BASIS_K = PG.GeometryParameterBasis([2])
+BASIS_QUAD = PG.GeometryParameterBasis([3])
+BASIS_CUBIC = PG.GeometryParameterBasis([4])
+GEOMETRY_PARAMETER_BASES = (; linear = BASIS_K, quadratic = BASIS_QUAD, cubic = BASIS_CUBIC)
+
+MATERIAL = SVKMaterial(E = E, ν = ν, ρ = RHO)
+DAMPING = RayleighDamping(α = ALPHA, β = BETA)
 
 # Analytic shape-field geometry: provider (J₀, ∇ψ₁) per quadrature point.
 include(joinpath(@__DIR__, "fem", "arch_geometry.jl"))
 GEOM(x₀) = arch_jacobian_pair(x₀, H0, L_SPAN)
 GEOM_BUILDER(dh, free, master_modes, ndofs_total) = GEOM   # analytic: no eigen data needed
 
-# Base operators for the eigenproblem come from the θ⁰ coefficient of the
-# parametric assembly (the base ARCH, not the straight beam) — computed once,
-# cached, and reused by PARAM_KM.
-const _KM_CACHE = Ref{Any}(nothing)
-function BASE_KM(dh, cv)
-	K_full = [allocate_matrix(dh) for _ in 1:PS.nterms(BASIS_K)]
-	M_full = [allocate_matrix(dh) for _ in 1:PS.nterms(BASIS_K)]
-	PS.assemble_parametric_K_M!(K_full, M_full, dh, cv,
-		LAMBDA_LAME, MU_LAME, RHO, GEOM, BASIS_K)
-	_KM_CACHE[] = (K_full, M_full)
-	return K_full[1], M_full[1]
-end
-function PARAM_KM(dh, cv, provider, free)
-	K_full, M_full = _KM_CACHE[]
-	return [Kf[free, free] for Kf in K_full], [Mf[free, free] for Mf in M_full]
+# The geometry is analytic, so the parametric assembly needs no eigen data and
+# can run FIRST; the eigenproblem is then solved on its θ⁰ coefficient — the
+# base ARCH, not the straight beam. That ordering is what dissolves the old
+# `_KM_CACHE` global: assembly happens once, inside `parametric_model`.
+function BUILD_CASE(dh, cv, free)
+	pcase = SVK.parametric_model(dh, cv, GEOM;
+		geometry_parameter_basis = GEOMETRY_PARAMETER_BASES, material = MATERIAL, damping = DAMPING, free = free)
+	K0, M0 = SVK.base_operators(pcase)
+	eigenproblem = spectrum(K0, M0,
+		StructureModalDampingEigensolver(NEV, ALPHA, BETA);
+		sorter! = (args...) -> nothing)
+	return pcase, eigenproblem
 end
 
-SANITY(K_arr, M_arr, K_ref, master_eigenvalues, master_modes) = nothing
+SANITY(pcase, eigenproblem) = nothing
 
 # Anisotropic multiindex set: total degree ≤ MAXZ in (z₁,z₂), θ-degree ≤ MAXT,
 # joint total capped at MAXZ.

@@ -53,17 +53,15 @@ Pkg.instantiate()
 
 using MORFE
 using MORFEFerrite
-# Promoted fluid backend (was fem/{fem_setup,linear_operators,fluid_maps,energy_gram}.jl
-# + solver/steady_state.jl): setup_fem, solve_steady_state, assemble_linear_operators,
-# FluidConvection, make_param_coupling, make_base_forcing, assemble_K_visc, lift/energy
-# helpers. Mesh *generation* (Gmsh) stays example-local in fem/mesh.jl.
+# The fluid backend, now including the whole "mesh → ROM" layer: `fluid_model`
+# assembles (FEM setup, Newton base flow, linearised operators, η′ coupling) and
+# `parametrise` reduces (Hopf eigenproblem, model, cohomological solve). The
+# eigensolver lives here too — this file used to include its own copy.
+# Mesh *generation* (Gmsh) stays example-local in fem/mesh.jl.
 using MORFEFerrite.FluidNavierStokes
 using Ferrite
 using FerriteGmsh
 using Gmsh
-using Arpack
-using LinearMaps
-using StaticArrays
 using LinearAlgebra
 using SparseArrays
 using Printf
@@ -72,7 +70,6 @@ using DelimitedFiles
 
 include(joinpath(@__DIR__, "config.jl"))
 include(joinpath(@__DIR__, "fem", "mesh.jl"))
-include(joinpath(@__DIR__, "solver", "eigensolver.jl"))
 include(joinpath(@__DIR__, "exports.jl"))
 
 # Results directory (deterministic name — the same config overwrites the previous run)
@@ -108,48 +105,23 @@ meshfile = r_mesh.value
 #     around the base flow vanishes on every prescribed boundary.
 # ─────────────────────────────────────────────────────────────────────────────
 
-println(_out, "\n[2/10] Ferrite P2/P1 Taylor-Hood FEM setup ...")
-r_fem = @timed setup_fem(meshfile)
-fom = r_fem.value
-println(_out, "  Free DOFs (steady state): $(fom.n_free)")
-println(_out, "  Free DOFs (DPIM): $(fom.n_free_dpim)")
+#     Stages 2-5 — FEM setup, the Newton base flow, the linearised operators, and
+#     the η′ coupling — are ONE call. With ν = D/Re the parameter
+#     η′ = 1/Re − 1/Re₀ enters linearly through the viscous term:
+#       g₁(s, η′) = −D·η′·K_raw·u′   (operator change on the perturbation)
+#       h₀(η′)    = −D·η′·K_raw·u₀   (base-flow forcing; u₀ is the FULL base flow,
+#     its prescribed inlet DOFs carrying the Poiseuille profile, so h₀ needs the
+#     rectangular free×ALL block of K_raw rather than the free×free one).
+#     `fluid_model` applies that −D scaling, so the convention lives in the module
+#     instead of in a comment here.
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3 — Base flow: steady Navier-Stokes solution u₀ at Re₀ (Newton iteration).
-#     The manifold is expanded around this fixed point.
-# ─────────────────────────────────────────────────────────────────────────────
-
-println(_out, "\n[3/10] Newton steady-state at Re₀ = $Re₀ ...")
-r_ss = @timed solve_steady_state(fom; Re0 = Re₀)
-(_, _, s₀_full) = r_ss.value
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4 — Linearised operators. The perturbation s = [u′; p′] obeys the descriptor
-#     system  B₁ ṡ + B₀ s = F(s, η′):  B₁ is the velocity mass matrix (singular —
-#     pressure has no time derivative), B₀ = −A_lin collects viscosity, base-flow
-#     convection and the pressure/incompressibility coupling.
-# ─────────────────────────────────────────────────────────────────────────────
-
-println(_out, "\n[4/10] Assembling linearised NSE operators ...")
-r_ops = @timed assemble_linear_operators(s₀_full, fom; Re0 = Re₀)
-(B₀, B₁) = r_ops.value
-println(_out, "  B₁ nnz = $(nnz(B₁)),  B₀ nnz = $(nnz(B₀))")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5 — The η′ trick. With ν = D/Re, the parameter η′ = 1/Re − 1/Re₀ enters the
-#     equations LINEARLY through the viscous term:
-#       g₁(s, η′) = −D·η′·K_raw·u′        (operator change on the perturbation)
-#       h₀(η′)    = −D·η′·K_raw·u₀        (base-flow forcing; u₀ is the FULL base
-#     flow — its prescribed inlet DOFs carry the Poiseuille profile, so h₀ needs
-#     the rectangular free×ALL block of K_raw, not the free×free one.)
-# ─────────────────────────────────────────────────────────────────────────────
-
-println(_out, "\n[5/10] Assembling K_visc and base-flow forcing h₀ ...")
-r_kvisc = @timed assemble_K_visc(fom)
-(K_visc, K_visc_rect) = r_kvisc.value
-K_visc .*= -_CYL_D
-h₀_vec = -_CYL_D .* (K_visc_rect * s₀_full)
-println(_out, "  K_visc nnz = $(nnz(K_visc))")
+println(_out, "\n[2-5/10] Assembling the fluid model at Re₀ = $Re₀ ...")
+r_model = @timed fluid_model(meshfile; Re = Re₀)
+case = r_model.value
+show(_out, MIME"text/plain"(), case)
+println(_out)
+fom = case.fom
+s₀_full = case.s₀_full
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6 — Master modes: the Hopf pair. Shift-invert ARPACK on A_lin y = λ B₁ y finds
@@ -158,72 +130,41 @@ println(_out, "  K_visc nnz = $(nnz(K_visc))")
 #     eigenvectors seed the two master coordinates z₁, z̄₁ of the manifold.
 # ─────────────────────────────────────────────────────────────────────────────
 
-println(_out, "\n[6/10] Shift-invert ARPACK eigenproblem ...")
-r_eig = @timed solve_hopf_eigenproblem(
-	-B₀, B₁;
+#     Stages 6-8 are the reduction, and are also ONE call.
+#
+#     6 — Master modes: shift-invert ARPACK on A_lin y = λ B₁ y finds the
+#         least-damped conjugate pair λ₁,₂ = σ₀ ± iω₀ (σ₀ ≈ 0 near Re_c,
+#         ω₀ ≈ 16.86 rad/s — the shedding frequency), seeding z₁, z̄₁. The
+#         `A_lin = −B₀` convention and the `1e-2` mode scaling both belong to the
+#         module now; the scaling is passed as `scale`, since `SpectralData` has no
+#         `scale` field and the gauge must stay visible.
+#     7 — The model: quadratic convection f₂(s,s) = −(u·∇)u assembled on the fly,
+#         the two η′ terms, and η′ itself as a trivial external system η̇′ = 0.
+#         N_EXT = 1 is ODD — η′ is real, hence self-conjugate — so the permutation
+#         is derived with `full_conjugate_permutation` rather than written out.
+#     8 — The solve. A normal-form resonance set keeps only the resonant monomials
+#         z₁|z₁|^{2k} η′^j in R; everything else is absorbed into W. Detection uses
+#         `:imaginary_part_only` (frequency alone, ignoring the growth rate) — the
+#         historical choice, now named. It is graded, so lower orders are exact
+#         truncations of this run.
+
+println(_out, "\n[6-8/10] Hopf eigenproblem, model and cohomological solve (order $MAX_ORD) ...")
+r_dpim = @timed parametrise(case;
+	order = MAX_ORD,
 	nev = EIG_NEV,
 	sigma_re = EIG_SIGMA_RE,
 	sigma_im = EIG_SIGMA_IM,
 	target_freq = EIG_TARGET_FREQ,
-)
-(master_eigenvalues, master_modes, left_eigenmodes, all_eigenvalues, all_modes) = r_eig.value
+	scale = 1e-2,
+	resonance_eigenvalues = :imaginary_part_only)
+rom = r_dpim.value
+show(_out, MIME"text/plain"(), rom)
+println(_out)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 7 — Full-order model for the DPIM: the quadratic convection f₂(s,s) = −(u·∇)u
-#     (FEM-assembled on the fly), the two η′ terms from stage 5, and the
-#     parameter itself as a trivial external system η̇′ = 0. The multiindex set
-#     enumerates every monomial z₁^a z̄₁^b η′^c up to total degree MAX_ORD.
-# ─────────────────────────────────────────────────────────────────────────────
-
-println(_out, "\n[7/10] Building NthOrderModel and multiindex set ...")
-mset = all_multiindices_up_to(NVAR, MAX_ORD; min_degree = 1)
-convection = FluidConvection(fom; max_unique_cols = length(mset))
-g₁ = make_param_coupling(K_visc)
-h₀ = make_base_forcing(h₀_vec)
-ext_sys = ExternalSystem((0.0 + 0.0im,))
-
-model = NthOrderModel((B₀, B₁), (convection, g₁, h₀), ext_sys)
-println(_out, "  $(length(mset)) monomials (NVAR=$NVAR, order ≤ $MAX_ORD)")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 8 — DPIM solve. The normal-form-style resonance set keeps only the resonant
-#     monomials z₁|z₁|^{2k} η′^j in the reduced dynamics; everything else is
-#     absorbed into the manifold map W. Solving the cohomological equations
-#     order-by-order yields
-#       W : (z₁, z̄₁, η′) ↦ full state      (the invariant-manifold embedding)
-#       R : ż = R(z)                        (the reduced dynamics on it)
-#     The solve is graded — degree-N coefficients never depend on degrees > N —
-#     which is why lower orders are exact truncations of this run.
-# ─────────────────────────────────────────────────────────────────────────────
-
-println(_out, "\n[8/10] Solving cohomological equations (order $MAX_ORD) ...")
-lambda_im = ComplexF64[complex(0.0, imag(λ)) for λ in master_eigenvalues]
-resonance_set = resonance_set_from_complex_normal_form_style(
-	mset, Vector{ComplexF64}(lambda_im), 0.05 * abs(imag(master_eigenvalues[1]));
-	external_eigenvalues = ComplexF64[0.0+0.0im])
-
-println(_out, "\nResonance set  (NVAR=$NVAR, max_degree=$MAX_ORD)")
-for t in 1:NVAR
-	cols = resonant_multiindices(resonance_set, t)
-	@printf(_out, "     Target %d:  %d monomials\n", t, length(cols))
-	isempty(cols) || println(_out, "       ", join(["$(mset.exponents[k])" for k in cols], "  "))
-end
-
-# mode 1 (Im>0) ↔ mode 2 (Im<0); the external block is derived from `ext_sys` rather than
-# written out, so it stays correct if the external system ever gains a non-triangular
-# linear part (which would re-base its coordinates). Here it yields [2, 1, 3]: η′ has a
-# real eigenvalue, hence is its own conjugate — an odd N_EXT that the usual
-# adjacent-pairs formula cannot express.
-conj_map = full_conjugate_permutation([2, 1], ext_sys)
-@assert conj_map == [2, 1, 3]
-# The mode scaling is applied to the raw arrays BEFORE the bundle is built: `SpectralData`
-# deliberately has no `scale` field, so conditioning tweaks stay visible at the call site.
-spectral = SpectralData(; eigenvalues = master_eigenvalues,
-	right_modes = master_modes .* 1e-2,   # scale modes for better numerical stability (see discussion in #48)
-	left_modes = left_eigenmodes .* 1e-2)
-r_dpim = @timed solve_cohomological_problem(model, mset, spectral, resonance_set;
-	conjugate_permutation = conj_map)
-(W, R) = r_dpim.value
+W, R, mset = rom.W, rom.R, rom.mset
+master_eigenvalues = rom.eigenvalues
+all_eigenvalues = rom.info.spectrum.all_eigenvalues
+all_modes = rom.info.spectrum.all_modes
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 9 — Report the reduced dynamics: the first row ż₁ = R₁(z₁, z̄₁, η′) is the
@@ -249,9 +190,8 @@ MORFE.save_rom(RESULTS_DIR, W, R; metadata = [
 	"max_order" => MAX_ORD, "fast" => FAST])
 
 # Lift functional: l picks the pressure traction −p·n_y on the cylinder boundary.
-l_free = compute_pressure_lift_weights(fom)[fom.free_dpim]
-L0_lift = dot(l_free, real.(s₀_full[fom.free_dpim]))   # base-flow lift
-L_coeffs_lift = export_lift_polynomial(_out, DATA_DIR, W, l_free, L0_lift)
+(l_free, L0_lift) = lift_functional(case)
+L_coeffs_lift = export_lift_polynomial(_out, DATA_DIR, rom, l_free, L0_lift)
 
 # TKE Gram: the L×L matrix that lets Python evaluate ⟨TKE⟩ without FOM-sized data.
 (M_vel, vel_rows, area) = prepare_energy_gram(fom)
@@ -264,8 +204,15 @@ export_lift_csv(_out, DATA_DIR, mset, L0_lift, L_coeffs_lift)
 csv_path = joinpath(DATA_DIR, "R_coefficients.csv")
 EXPORT_MATLAB && export_matlab_model(_out, DATA_DIR, csv_path; re0 = Re₀, ord = MAX_ORD)
 
-write_summary(_out, RESULTS_DIR, fom, master_eigenvalues,
-	r_mesh, r_fem, r_ss, r_ops, r_kvisc, r_eig, r_dpim;
-	re0 = Re₀, ord = MAX_ORD, nvar = NVAR)
+# The summary skeleton (sizes, order, every `*_time_s` stage) is shared across
+# physics modules; FluidNavierStokes contributes its own rows through
+# `Common.summary_entries`. Appends to the summary.txt `MORFE.save_rom` wrote.
+write_summary(_out, joinpath(RESULTS_DIR, "summary.txt"), case;
+	rom = rom,
+	title = "Kármán Vortex Street DPIM — Summary  " *
+			"(Re₀ = $Re₀, order = $MAX_ORD, NVAR = $NVAR)",
+	metadata = ["mesh_time_s" => @sprintf("%.3f", r_mesh.time),
+		"mesh_h_cyl" => MESH_H_CYL, "mesh_h_wake" => MESH_H_WAKE,
+		"mesh_h_bulk" => MESH_H_BULK, "fast" => FAST])
 
 close(_log)

@@ -97,11 +97,10 @@ Project the lift weight vector onto the parametrisation, L_α = lᵀW_α (biline
 the adjoint would conjugate), serialise `lift_polynomial.jls`, and return the
 coefficient vector for the CSV export.
 """
-function export_lift_polynomial(out::IO, data_dir::AbstractString, W, l_free, L0)
-	C = MORFE.ParametrisationMethod.coefficients(W)   # (FOM, 1, L)
-	W1_coeffs = @view(C[:, 1, :])                     # (FOM, L)
-	mset_l = MORFE.ParametrisationMethod.multiindex_set(W)
-	L_coeffs = vec(transpose(W1_coeffs) * l_free)     # (L,) ComplexF64
+function export_lift_polynomial(out::IO, data_dir::AbstractString, rom, l_free, L0)
+	# The projection itself lives in FluidNavierStokes (observables.jl), next to
+	# write_energy_gram — this function is only the serialisation around it.
+	(L_coeffs, mset_l) = lift_polynomial(rom, l_free)
 	serialize(joinpath(data_dir, "lift_polynomial.jls"),
 		(; L0 = L0, L_coeffs = L_coeffs, mset = mset_l))
 	@printf(out, "  Lift polynomial: L0 = %.6f, %d coefficients\n", L0, length(L_coeffs))
@@ -186,52 +185,5 @@ function export_vtk_bundle(data_dir::AbstractString, fom, s0_full,
 		all_modes = Matrix{ComplexF64}(all_modes),
 	)
 	serialize(joinpath(data_dir, "vtk_data.jls"), vtk_data)
-	return nothing
-end
-
-"""
-	write_summary(out, results_dir, fom, master_eigenvalues,
-	              r_mesh, r_fem, r_ss, r_ops, r_kvisc, r_eig, r_dpim; re0, ord, nvar)
-
-Print the timing table to `out` and write the structured `summary.txt`.
-"""
-function write_summary(out::IO, results_dir::AbstractString, fom, master_eigenvalues,
-		r_mesh, r_fem, r_ss, r_ops, r_kvisc, r_eig, r_dpim; re0, ord, nvar)
-	println(out)
-	println(out, _sep)
-	println(out, "Kármán Vortex Street DPIM — Summary")
-	println(out, "  Re₀ = $re0,  order = $ord,  NVAR = $nvar,  FOM = $(fom.n_free)")
-	@printf(out, "  Hopf eigenvalue:  λ₁ = %+.6f %+.6f·i\n",
-		real(master_eigenvalues[1]), imag(master_eigenvalues[1]))
-	println(out, _dash)
-	for (label, r) in (
-		("[1] Mesh generation", r_mesh), ("[2] FEM setup", r_fem),
-		("[3] Newton steady-state", r_ss), ("[4] Linear operators", r_ops),
-		("[5] K_visc + h₀", r_kvisc), ("[6] Eigenproblem", r_eig),
-		("[8] Cohomological solve", r_dpim))
-		@printf(out, "  %-36s  %9.3f s  %8.2f GB\n", label, r.time, to_gb(r.bytes))
-	end
-	println(out, _sep)
-	println(out, "Next:  julia --project=. solve_rom.jl   →   python3 compare_orders.py")
-
-	open(joinpath(results_dir, "summary.txt"), "w") do io
-		println(io, "example: 05_karman_vortex_street")
-		@printf(io, "run_name: Re%.2f_ord%d\n", re0, ord)
-		println(io, "model: 2D Navier-Stokes, Kármán vortex street, Ferrite P2/P1 Taylor-Hood")
-		println(io, "n_free: $(fom.n_free)")
-		println(io, "Re0: $re0")
-		println(io, "master_modes: 2  (Hopf pair)")
-		println(io, "master_eigenvalues: $(collect(master_eigenvalues))")
-		println(io, "parametrisation_order: $ord")
-		@printf(io, "cohomological_solve_time_s: %.3f\n", r_dpim.time)
-		println(io, "julia_version: $(VERSION)")
-		commit = try
-			readchomp(`git rev-parse --short HEAD`)
-		catch
-			"unknown"
-		end
-		println(io, "morfe_commit: $commit")
-		println(io, "timestamp: $(time())")
-	end
 	return nothing
 end
