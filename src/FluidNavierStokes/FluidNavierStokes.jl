@@ -48,6 +48,10 @@ export velocity_dof_mask, assemble_velocity_mass_full, domain_area,
 	prepare_energy_gram, write_energy_gram
 export solve_hopf_eigenproblem, AbstractModeNormalisation,
 	SymmetricBiorthogonal, LeftBiorthogonal, NoNormalisation
+# Exported because MODE SELECTION belongs to the driver, not to this module, and choosing
+# which modes can carry a master coordinate requires their bilinear pairing α = ψᵀB₁φ.
+# See the warning in its docstring: never call it for both halves of a conjugate pair.
+export left_eigenvector
 export AssembledFluidModel, fluid_model, build_model
 export lift_functional, lift_polynomial
 

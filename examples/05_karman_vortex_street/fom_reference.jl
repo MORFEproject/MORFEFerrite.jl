@@ -289,6 +289,22 @@ end
 # Per-run-directory driver
 # ─────────────────────────────────────────────────────────────────────────────
 
+"""
+    run_n_free(run_dir) -> Int or nothing
+
+Free-DOF count a run was computed with, read from its `summary.txt` (`n_free: …`).
+`nothing` when the file predates that field, in which case the caller proceeds unchecked.
+"""
+function run_n_free(run_dir::AbstractString)
+	path = joinpath(run_dir, "summary.txt")
+	isfile(path) || return nothing
+	for line in eachline(path)
+		m = match(r"^\s*n_free\s*:\s*(\d+)", line)
+		m === nothing || return parse(Int, m.captures[1])
+	end
+	return nothing
+end
+
 function process_dir(run_dir::AbstractString, fom, l_free, M_vel, vel_rows, area)
 	data_dir = joinpath(run_dir, "data")
 	m = match(r"^Re([\d.]+)_ord(\d+)$", basename(run_dir))
@@ -297,6 +313,23 @@ function process_dir(run_dir::AbstractString, fom, l_free, M_vel, vel_rows, area
 
 	w_path = joinpath(data_dir, "W.jls")
 	isfile(w_path) || (println("  skip (no data/W.jls): $run_dir"); return)
+
+	# A run directory is tied to the MESH it was computed on, and this script sets the FEM
+	# up from whatever fem/cylinder_flow.msh currently holds. Mixing the two integrates a
+	# ROM state of one size against operators of another, which surfaces far downstream as
+	# `BoundsError: 14436-element Vector at index [14437]` inside the convection kernel.
+	# The FAST profile (14 436 DOFs) and the FULL one (57 860) collide exactly this way,
+	# and the directory name does not distinguish them — only the recorded n_free does.
+	n_free_run = run_n_free(run_dir)
+	if n_free_run !== nothing && n_free_run != fom.n_free_dpim
+		@warn """
+		skip $(basename(run_dir)): built on a DIFFERENT mesh than the one loaded here \
+		($(n_free_run) free DOFs vs $(fom.n_free_dpim)). This is almost always a FAST run \
+		sitting next to a FULL one — they are different discretisations and cannot share a \
+		FOM reference. Pass the matching directory explicitly, or re-run main.jl under the \
+		profile you want."""
+		return
+	end
 	println("── $run_dir  (Re₀ = $re0)")
 
 	W = deserialize(w_path)
@@ -404,7 +437,10 @@ end
 
 run_dirs = if isempty(ARGS)
 	base = joinpath(@__DIR__, "results")
-	sort(filter(d -> occursin(r"^Re[\d.]+_ord\d+$", basename(d)) && isdir(d),
+	# The trailing `(_.+)?` matches the run tag (config.jl's RUN_TAG, e.g.
+	# `_ONLY_HOPF_MODES`). Without it this skipped every tagged run and silently
+	# processed whatever un-tagged directory an older mode selection left behind.
+	sort(filter(d -> occursin(r"^Re[\d.]+_ord\d+(_.+)?$", basename(d)) && isdir(d),
 		readdir(base; join = true)))
 else
 	[abspath(a) for a in ARGS]

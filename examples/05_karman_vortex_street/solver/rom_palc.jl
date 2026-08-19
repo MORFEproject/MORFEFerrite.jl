@@ -27,7 +27,37 @@ Evaluate the first component of the reduced dynamics at the canonical phase
 z₁ = ρ (real), z₂ = ρ, η' = η.
 """
 @inline function _rom_R1(ρ::Float64, η::Float64, R)
-    z = ComplexF64[ρ, ρ, η]
+    # Coordinate layout: z₁, z̄₁, then any PROMOTED modes y, then η′ last.
+    #
+    # The promoted coordinates are SLAVED, not zeroed. They carry the mean-flow
+    # distortion — ẏ_k is driven by z₁z̄₁ — and hand it back to the oscillator through
+    # z₁·y_k, which is the dominant stabilising contribution to the Landau coefficient.
+    # Setting them to zero removes it and reports a supercritical Hopf as subcritical.
+    #
+    # On the orbit they are quasi-steady, so they solve R_k(ρ, ρ, y, η) = 0. The
+    # monomial set carries at most ONE promoted coordinate to the first power, so R is
+    # exactly AFFINE in y and that is one small linear solve — not an iteration, and
+    # not an approximation.
+    nvar = length(first(R.poly.multiindex_set.exponents))
+    npro = nvar - 3
+    z = zeros(ComplexF64, nvar)
+    z[1] = ρ
+    z[2] = ρ
+    z[end] = η
+    npro == 0 && return evaluate(R.poly, z)[1]::ComplexF64
+
+    rows = 3:(2 + npro)
+    b = ComplexF64[evaluate(R.poly, z)[k] for k in rows]        # R_k at y = 0
+    A = Matrix{ComplexF64}(undef, npro, npro)
+    for (j, _) in enumerate(rows)                               # ∂R_k/∂y_j, exact
+        zj = copy(z)
+        zj[2 + j] = 1
+        rj = evaluate(R.poly, zj)
+        for (k, kk) in enumerate(rows)
+            A[k, j] = rj[kk] - b[k]
+        end
+    end
+    z[rows] .= A \ (-b)
     return evaluate(R.poly, z)[1]::ComplexF64
 end
 

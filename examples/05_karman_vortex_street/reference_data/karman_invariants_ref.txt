@@ -1,0 +1,15 @@
+# Kármán vortex street — promotion-invariant ROM reference.
+# Valid for a run WITH or WITHOUT promoted outer modes: every quantity
+# here is computed after slaving the promoted coordinates.
+# Derived from the blessed order-9 R_coefficients_ref.csv (un-promoted, NVAR=3), MODE_SCALE=1e-2.
+
+σ            = 0.00402844000347
+ω            = 16.859169021
+c101_re      = -212.007932281
+c101_im      = -59.107701235
+c210_re      = -0.11101107793
+c210_im      = 0.0706507599091
+c210_ratio   = -0.636429816074
+
+# informational only — not compared
+criticality  = supercritical

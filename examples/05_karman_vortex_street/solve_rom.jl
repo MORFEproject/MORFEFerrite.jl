@@ -49,7 +49,20 @@ function trace_branch(R; re_max = BRANCH_RE_MAX, ds0 = BRANCH_DS0,
 
 	Δs = ds0
 	for _ in 1:max_steps
-		ρn, ηn, Tn, τn, n_iter, ok = rom_palc_step(ρ, η, τ, Δs, R)
+		# A diverging Newton step can hand `_rom_R1` a non-finite ρ — at order 9 a modest
+		# overshoot overflows through ρ⁹ — and `lu` then reports SingularException on the
+		# slaving solve rather than anything about the continuation. (The slaving matrix
+		# itself is healthy: swept over the whole physical (ρ, η) window its smallest
+		# singular value stays above 1.) Treat it as a failed step so the arclength halves,
+		# exactly like a non-converged one, instead of losing the branch and the script.
+		local ρn, ηn, Tn, τn, n_iter, ok
+		try
+			(ρn, ηn, Tn, τn, n_iter, ok) = rom_palc_step(ρ, η, τ, Δs, R)
+			isfinite(ρn) && isfinite(ηn) || (ok = false)
+		catch err
+			err isa LinearAlgebra.SingularException || err isa DomainError || rethrow()
+			ok = false
+		end
 		if !ok
 			Δs /= 2
 			Δs < 1e-12 && (@warn "PALC stalled (Δs < 1e-12)"; break)
@@ -79,8 +92,17 @@ solve is graded, this IS the order-N reduced dynamics (bit-exact).
 function truncate_dynamics(R, N::Int)
 	Rt = deepcopy(R)
 	exps = Rt.poly.multiindex_set.exponents
+	nvar = length(first(exps))
 	for (m, e) in enumerate(exps)
-		sum(e) > N && (Rt.poly.coefficients[:, m] .= 0)
+		# Truncate on the CORE degree — (z₁, z̄₁, η′) — not the total.
+		#
+		# The truncation order refers to the expansion in the master oscillator and the
+		# Reynolds direction. Any PROMOTED coordinates are first order by construction
+		# and are not part of that hierarchy, so counting them would drop the mean-flow
+		# coupling z₁·y_k at low N and silently return a ROM with no saturation
+		# mechanism — the sign of the Landau coefficient would flip.
+		core = e[1] + e[2] + e[nvar]
+		core > N && (Rt.poly.coefficients[:, m] .= 0)
 	end
 	return Rt
 end
@@ -94,7 +116,15 @@ function process_dir(run_dir::AbstractString)
 	for N in TRUNC_ORDERS
 		N > max_deg && (println("  skip order $N (> run order $max_deg)"); continue)
 		println("  ── truncation order $N")
-		rows = trace_branch(truncate_dynamics(R, N))
+		# One unusable truncation must not cost the other orders or the other run
+		# directories: report it and carry on.
+		rows = try
+			trace_branch(truncate_dynamics(R, N))
+		catch err
+			@warn "order $N branch abandoned in $(basename(run_dir)): $(sprint(showerror, err))"
+			continue
+		end
+		isempty(rows) && (println("  no branch points at order $N"); continue)
 		out_csv = joinpath(run_dir, "data", "rom_branch_ord$(N).csv")
 		open(out_csv, "w") do io
 			println(io, "eta,Re,rho,omega,T")
@@ -109,7 +139,10 @@ end
 
 run_dirs = if isempty(ARGS)
 	base = joinpath(@__DIR__, "results")
-	sort(filter(d -> occursin(r"^Re[\d.]+_ord\d+$", basename(d)) && isdir(d),
+	# The trailing `(_.+)?` matches the run tag (config.jl's RUN_TAG, e.g.
+	# `_ONLY_HOPF_MODES`). Without it this skipped every tagged run and silently
+	# processed whatever un-tagged directory an older mode selection left behind.
+	sort(filter(d -> occursin(r"^Re[\d.]+_ord\d+(_.+)?$", basename(d)) && isdir(d),
 		readdir(base; join = true)))
 else
 	[abspath(a) for a in ARGS]

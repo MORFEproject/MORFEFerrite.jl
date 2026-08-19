@@ -20,4 +20,11 @@ using Test
         include("ParametricGeometry/test_kernel_golden.jl")
         include("ParametricGeometry/test_build_model.jl")
     end
+
+    # The conjugate-symmetry invariant the fluid reduction rests on. Mesh-free by
+    # design: the run that would catch a violation end-to-end is order 9 on a 58k-DOF
+    # mesh, which is far too heavy to keep in the default suite.
+    @testset "FluidNavierStokes" begin
+        include("FluidNavierStokes/test_conjugate_pairing.jl")
+    end
 end

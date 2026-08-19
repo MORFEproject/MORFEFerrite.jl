@@ -25,6 +25,17 @@ sibling checkout at `../../MORFE_jl`.
 
 VTK export is the `MORFEFerriteWriteVTKExt` extension, activated by `using WriteVTK`.
 
+## Local hardware limits
+
+**Do not run `examples/05` without `MORFE_FAST=1` on the development machine**, and do not
+run heavy Julia jobs concurrently. The FULL Kármán profile is 57,860 free DOFs at order 9
+(`W` ≈ 220 MB plus the solver working set); several such runs in parallel froze the machine
+and required a reboot. FAST is 14,436 DOFs at order 3, `W` ≈ 11 MB, ~1 minute.
+
+The package suite, the MORFE suite and the SVK gates are each light — run them **one at a
+time** rather than backgrounding several. Order-9 / full-mesh work belongs on other
+hardware.
+
 ## Tests & gates
 
 ```bash
@@ -62,6 +73,18 @@ Validation invariants (do not regress):
 - Fluid: gauge-invariant Kármán quantities (λ, c₁₀₁, Im/Re of c₂₁₀) vs
   `examples/05_karman_vortex_street/reference_data/` (raw R is NOT
   run-comparable across Arpack runs).
+- Fluid **conjugate symmetry**: `Φ[:, σ(r)] = conj(Φ[:, r])` and likewise `Ψ`, asserted inside
+  every `build_model`. Never call `left_eigenvector` for both halves of a pair — `eigs` pins the
+  left vector only up to a scalar, so the second solve returns a phase-rotated partner and the
+  reduction then exploits a symmetry that is not there, **silently**: λ and everything linear in
+  the master coordinate stay exact while the nonlinear coefficients keep their modulus and rotate
+  in phase. Fill the partner by conjugation instead. `test/FluidNavierStokes/test_conjugate_pairing.jl`
+  covers the two helpers mesh-free.
+- Fluid **degenerate real modes**: most near-real Kármán modes have `|ψᵀBφ| ≲ 1e-11` and cannot
+  carry a master coordinate (the gauge divides by √α); they sit in the essential spectrum, where
+  Arpack's left and right vectors for the same λ are not the same mode. `left_eigenvector` warns
+  below 1e-8 and names the mode — that warning means "drop it from `master`", not noise. At
+  Re₀ = 49.03 only λ ≈ −2.11 is comfortably promotable.
 
 ## Examples
 
@@ -69,6 +92,37 @@ Validation invariants (do not regress):
 corrected two-parameter beam, 07 the single-parameter arch), `05` (Kármán,
 FluidNavierStokes), `08` (MEMS micromirror). Drivers accept
 `MORFE_MAXZ`/`MORFE_MAXT` env overrides where noted.
+
+**ex05 has ONE results directory and ONE reference.** `RESULTS_DIR` lives in `config.jl` (not
+`main.jl`, which is where it drifted from `validate.jl` and caused a days-old directory to be
+validated silently); it is `results/Re<Re₀>_ord<N>/`, untagged, so `validate.jl`,
+`solve_rom.jl` and `fom_reference.jl` all agree.
+
+The reference is `reference_data/karman_invariants_ref.txt` — **physical invariants, not raw
+R**: λ = σ+iω, c₁₀₁, the effective Landau coefficient c₂₁₀ and its gauge-free ratio
+Im/Re. It validates a run **with or without promoted outer modes**, because `invariants.jl`
+SLAVES the promoted coordinates (solving R_k = 0; R is exactly affine in them) before reading
+the coefficients off. Zeroing them instead drops the mean-flow distortion and misreports
+criticality — `test_invariants.jl` proves the invariance analytically. `R_coefficients_ref.csv`
+is kept only as the archived order-9 output the invariants were derived from; nothing reads it.
+
+`validate.jl --bless` rewrites the reference from the current run, and refuses to do so from
+the FAST profile (different mesh). It also warns when the artefact predates `src/FluidNavierStokes/`.
+
+**Two analyses.** `MORFE_PROMOTE=1` promotes the resonant outer modes into the master set at
+first order and writes to `…_promoted/`; without it only the Hopf pair is master. Promotion is
+a change of coordinates, so both must give the same physics — `compare_runs.jl` checks that via
+`invariants.jl`. λ at the bifurcation must be **exact** between them (the promoted coordinates
+slave to zero at ρ→0, η′=0); `c₁₀₁` and `c₂₁₀` agree only up to the `PROMOTED_CORE_ORD`
+truncation of `y_k`, and that residual is the result of interest. Criticality must match.
+
+**Not every resonant mode can be promoted.** `α = ψᵀB₁φ` is the normalisation denominator
+(both sides ÷ √α) and `B₁` is **singular** — 6636 of 57860 rows are P1 pressure DOFs, so this is
+a descriptor pencil whose null-space vectors are algebraic incompressibility modes with α = 0.
+`main.jl`'s Pass 1.5 measures α for every candidate and drops those below
+`PROMOTE_ALPHA_RTOL · |α_Hopf|` (relative, since |α_Hopf| ≈ 6e-6 depends on mesh and Arpack
+scaling), logging a full table. A conjugate pair always shares |α|, so the filter cannot split
+one. `compare_orders.py` emits **one figure per run** and refuses to mix meshes.
 
 ## Known limitations
 

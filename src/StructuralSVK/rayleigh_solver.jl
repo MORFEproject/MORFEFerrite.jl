@@ -42,9 +42,11 @@ function MORFE.SpectralDecomposition.eigensolve(model::NthOrderModel, solver::Ra
 
 	λ_all = zeros(ComplexF64, 2 * solver.nev)
 	for i in 1:solver.nev
-		ξ = 0.5 * (solver.damping.α / ω[i] + solver.damping.β * ω[i])
-		λ_all[2i-1] = ω[i] * (-ξ + sqrt(Complex(1.0 - ξ^2)) * im)
-		λ_all[2i] = ω[i] * (-ξ - sqrt(Complex(1.0 - ξ^2)) * im)
+		ω2 = ω[i]^2
+		ξω = 0.5 * (solver.damping.α + solver.damping.β * ω2)
+		aux = sqrt(Complex(ω2 - ξω^2))
+		λ_all[2i-1] = -ξω + aux * im
+		λ_all[2i] = -ξω - aux * im
 	end
 
 	evecs = Matrix{ComplexF64}(undef, 2FOM, 2 * solver.nev)
@@ -76,6 +78,6 @@ function MORFE.SpectralDecomposition.eigensolve_left(model::NthOrderModel, solve
 	# stands in there purely to make the tuple the right length.
 	left = left_eigenmode_orders_from_slice(
 		(model.linear_terms[3], model.linear_terms[2], model.linear_terms[3]),
-		view(Y, :, 1, :), solver.eigenvalues; apply = identity)
+		view(Y,:,1,:), solver.eigenvalues; apply = identity)
 	return solver.eigenvalues, left
 end
