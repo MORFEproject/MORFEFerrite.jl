@@ -1,9 +1,11 @@
 [deps]
 Arpack = "7d9fca2a-8960-54d3-9f78-7d1dccf2cb97"
+BifurcationKit = "0f109fa4-8a5d-4b75-95aa-f515264e7665"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 Ferrite = "c061ca5d-56c9-439f-9c0e-210fe06d3992"
 FerriteGmsh = "4f95f4f8-b27c-4ae5-9a39-ea55e634e36b"
 Gmsh = "705231aa-382f-11e9-3f0c-b7cb4346fdeb"
+IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
 KLU = "ef3ab10e-7fda-4108-b977-705223b18434"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LinearMaps = "7a12625a-238d-50fd-b39a-03d52299707e"

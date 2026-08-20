@@ -118,7 +118,10 @@ function write_energy_gram(data_dir::AbstractString, W, M_vel, vel_rows, area)
 	W1_vel = C[vel_rows, 1, :]                        # n_vel × L dense
 	G = (transpose(W1_vel) * (M_vel * W1_vel)) ./ area
 	exps = MORFE.ParametrisationMethod.multiindex_set(W).exponents
-	Avec = permutedims(reduce(hcat, [collect(Int, e) for e in exps]))   # L × 3
+	# L × NVAR — NOT L × 3. A promoted run carries extra master coordinates, and every
+	# consumer must truncate this on the CORE degree (z₁, z̄₁, η′) to match
+	# `truncate_dynamics`, not on the total degree.
+	Avec = permutedims(reduce(hcat, [collect(Int, e) for e in exps]))
 	writedlm(joinpath(data_dir, "tke_gram_re.csv"), real.(G), ',')
 	writedlm(joinpath(data_dir, "tke_gram_im.csv"), imag.(G), ',')
 	writedlm(joinpath(data_dir, "tke_avector.csv"), Avec, ',')

@@ -18,8 +18,10 @@ reads a `.msh` via FerriteGmsh.
 module FluidNavierStokes
 
 using MORFE
+using MORFE.Polynomials: evaluate   # rom_analysis.jl evaluates R at a point
 using Ferrite, FerriteGmsh
 using LinearAlgebra, SparseArrays, DelimitedFiles
+using Serialization: serialize   # observables.jl writes the VTK/lift bundles
 using KLU
 using ..Common: AbstractAssembledModel, Common
 import ..Common: build_model, summary_entries
@@ -40,6 +42,13 @@ include("fluid_model.jl")
 include("build_model.jl")
 include("observables.jl")
 
+# Post-processing of a finished ROM: slaving, limit-cycle continuation, the
+# promotion-invariant physical quantities, and the convergence diagnostics. Kept out of
+# the example because three copies of the slaving algorithm had drifted apart there.
+include("rom_analysis.jl")
+# Full-order time integration and periodic orbits — the DNS reference.
+include("fom_orbit.jl")
+
 export setup_fem, U_MEAN, U_MAX
 export solve_steady_state, assemble_steady_nse!, compute_drag_lift
 export assemble_linear_operators, check_linearisation, compute_pressure_lift_weights
@@ -54,5 +63,18 @@ export solve_hopf_eigenproblem, AbstractModeNormalisation,
 export left_eigenvector
 export AssembledFluidModel, fluid_model, build_model
 export lift_functional, lift_polynomial
+export export_reduced_dynamics, export_lift_polynomial, export_lift_csv, export_vtk_bundle
+
+# ROM post-processing (rom_analysis.jl)
+export ROMPoly, load_rom_poly, slaved_R1, truncate_dynamics
+export rom_po_residual, rom_po_frequency, rom_hopf_eta,
+	rom_palc_tangent, rom_palc_step, trace_limit_cycle_branch,
+	roots_at_re, sweep_branch_in_re
+export rom_invariants, read_invariants, write_invariants
+export homological_denominators, manifold_ratio_test, modal_growth
+
+# Full-order periodic orbits (fom_orbit.jl)
+export eval_perturbation_convection!, build_imex_operators, integrate_orbit!,
+	find_periodic_orbit, seed_from_branch, measure_orbit
 
 end # module FluidNavierStokes

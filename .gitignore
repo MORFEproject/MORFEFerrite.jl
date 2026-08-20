@@ -6,3 +6,10 @@ examples/*/results/
 .DS_Store
 */.DS_Store
 examples/09_electromechanical/DPIM_EMT3/DPIM_EMT3.7z
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
