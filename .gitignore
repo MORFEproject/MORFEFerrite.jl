@@ -13,3 +13,22 @@ __pycache__/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+
+# ── Local developer state — never tracked ────────────────────────────────────
+# Claude Code's project state and instruction file.
+.claude
+CLAUDE.md
+
+# Knowledge graph: regenerated machine state (AST cache, snapshots, HTML).
+# Rebuild with `graphify update .`.
+graphify-out/
+
+# Scratch notes, plans and analyses: the home for anything written for a
+# developer rather than a user, so it never reaches the index by accident.
+notes/
+
+# Developer-only documents. Named individually rather than by a blanket *.md,
+# which would swallow the READMEs and the reference-data PROVENANCE files.
+MIGRATION_PLAN.md
+MORFE_API_MIGRATION.md
+MODULE_ARCHITECTURE.md
