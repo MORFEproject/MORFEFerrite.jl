@@ -17,8 +17,11 @@
 using Ferrite
 
 # --- geometry provider dispatch --------------------------------------
-# A provider is called per quadrature point and must return the tuple
-# (J₀, ∇ψ₁, …, ∇ψ_{Nθ}) of `Tens3`. Two signatures are supported:
+# A provider is called per quadrature point and must return either
+#   (J₀, ∇ψ₁, …, ∇ψ_{Nθ})            — the affine map x₀ + Σᵢ θᵢψᵢ(x₀), or
+#   [α => J_α, …]                    — the general polynomial x = Σ_α x_α θ^α
+# of `Tensor{2,dim}` for ANY dim; `jacobian_series` dispatches on which. Two
+# signatures are supported:
 #   geom(x₀)                 — analytic shape fields (e.g. the sinusoidal arch)
 #   geom(x₀, cell, cv, q)    — FE-field shape modes (e.g. a bending eigenmode,
 #                              whose gradient needs the element/QP context)
@@ -47,45 +50,70 @@ Fields are indexed `[cell][qp]`:
 One cache serves every kernel over the same geometry: the quadratic and cubic
 forms of a structural physics differ only in which `det_powers` entry they read.
 """
-struct PullbackCache{Nθ}
+struct PullbackCache{Nθ, TT}
 	basis::GeometryParameterBasis{Nθ}
-	adj::Vector{Vector{Vector{Tens3}}}
+	adj::Vector{Vector{Vector{TT}}}
 	det::Vector{Vector{Vector{Float64}}}
 	inv_det::Vector{Vector{Vector{Float64}}}
 	inv_det_pow::Dict{Int, Vector{Vector{Vector{Float64}}}}
 end
 
+"""
+	adj_tensor_type(cache) -> Type
+
+The tensor type of the `adj J` coefficients, i.e. `Tensor{2,dim,Float64,dim²}`.
+The driver sizes its gradient buffers from this rather than from a hardcoded
+3D alias, which is what makes the assembly loops dimension-general.
+"""
+adj_tensor_type(::PullbackCache{Nθ, TT}) where {Nθ, TT} = TT
+
 function PullbackCache(dh::DofHandler, cv::CellValues, geom,
-	basis::GeometryParameterBasis{Nθ}; det_powers::AbstractVector{Int} = Int[]) where {Nθ}
-	adj = Vector{Vector{Tens3}}[]
+	basis::GeometryParameterBasis{Nθ}; det_powers::AbstractVector{Int} = Int[],
+	inverse_determinant::AbstractInverseDeterminant = PowerSeriesInverseDet()) where {Nθ}
+	# The dimension is whatever the geometry provider returns — probe it once
+	# rather than assuming 3, so a 2D physics needs no change here.
+	TT = _probe_tensor_type(dh, cv, geom, basis)
+	adj = Vector{Vector{TT}}[]
 	det = Vector{Vector{Float64}}[]
-	inv = Vector{Vector{Float64}}[]
 
 	for cell in CellIterator(dh)
 		reinit!(cv, cell)
 		coords = getcoordinates(cell)
-		acell = Vector{Tens3}[]
+		acell = Vector{TT}[]
 		dcell = Vector{Float64}[]
-		icell = Vector{Float64}[]
 		for q in 1:getnquadpoints(cv)
 			x₀ = spatial_coordinate(cv, q, coords)
 			J = jacobian_series(_geom_at(geom, x₀, cell, cv, q), basis)
 			det_ser, adj_ser = det_adj_series(J, basis)
 			push!(acell, adj_ser)
 			push!(dcell, det_ser)
-			push!(icell, reciprocal_series(det_ser, basis))
 		end
 		push!(adj, acell)
 		push!(det, dcell)
-		push!(inv, icell)
 	end
+
+	# THE SEAM between Method 4 (pointwise power series) and Method 3 (auxiliary
+	# FE field). Everything above and below is common to both.
+	inv = build_inverse_determinant(inverse_determinant, dh, cv, basis, det)
 
 	pow = Dict{Int, Vector{Vector{Vector{Float64}}}}()
 	for p in unique(det_powers)
 		pow[p] = [[inv_det_power(inv[ci][q], p, basis) for q in eachindex(inv[ci])]
 				  for ci in eachindex(inv)]
 	end
-	return PullbackCache{Nθ}(basis, adj, det, inv, pow)
+	return PullbackCache{Nθ, TT}(basis, adj, det, inv, pow)
+end
+
+# Ask the provider for one Jacobian tuple and read the dimension off it. Cheap,
+# and it keeps `dim` out of every signature in the module.
+function _probe_tensor_type(dh::DofHandler, cv::CellValues, geom,
+	basis::GeometryParameterBasis)
+	for cell in CellIterator(dh)
+		reinit!(cv, cell)
+		x₀ = spatial_coordinate(cv, 1, getcoordinates(cell))
+		return eltype(jacobian_series(_geom_at(geom, x₀, cell, cv, 1), basis))
+	end
+	throw(ArgumentError("PullbackCache: the DofHandler has no cells"))
 end
 
 """

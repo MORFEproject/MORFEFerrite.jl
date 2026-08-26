@@ -1,44 +1,74 @@
-# 01 — Clamped-clamped beam (Ferrite.jl backend)
+# 01 — Clamped beam
 
-## Model
+This notebook computes an invariant-manifold ROM for a conservative,
+clamped–clamped St. Venant–Kirchhoff beam. The quadratic Ferrite mesh has
+approximately 5,000 free degrees of freedom.
 
-Clamped-clamped beam with St. Venant-Kirchhoff material and cubic geometric nonlinearity,
-assembled via Ferrite.jl. Mesh: 40×3×1 Hex27 elements, quadratic Lagrange, ~4977 free DOFs.
-Shared mesh with example 02.
-
-## How to run (high-level UI)
-
-`main.jl` uses the `MORFEStructuralSVK` extension — the whole pipeline in a few lines:
+The example is intentionally limited to the public, physics-independent API:
 
 ```julia
-using MORFE, Ferrite, FerriteGmsh, Arpack, LinearMaps
-SVK = Base.get_extension(MORFE, :MORFEStructuralSVK)
-
-beam = SVK.mechanical_model("clamped_clamped_beam.msh";
-    material  = SVK.SVKMaterial(E = 160e3, ν = 0.22, ρ = 2.32e-3),
-    damping   = SVK.RayleighDamping(α = 5.37e-3, β = 1.86e-2),
-    dirichlet = "Dirichlet", fe_order = 2, quad_order = 3)
-
-rom = SVK.parametrise(beam; master = [1], order = 9)
-SVK.print_equations(rom)
+order = 3 # Change to 9 for the reference calculation.
+case = SVK.mechanical_model("clamped_clamped_beam.msh"; ...)
+(; model, spectral, meta) = build_model(case;
+    master = [1], expansion_order = order)
+W, R = parametrise(model, spectral, order;
+    resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
+MORFE.save_rom(results_dir, W, R) # optional
 ```
+
+There is no example-specific assembly, eigensolver, cohomological solver, ROM
+wrapper, or equation printer. Backend information remains available separately
+in `meta`.
+
+## Run
+
+Open and execute [`clamped_beam.ipynb`](clamped_beam.ipynb). Its committed
+outputs use order 3 so that the demonstration remains quick. The string
+`dirichlet = "Dirichlet"` selects the facet group named `Dirichlet` in the Gmsh
+mesh and fixes all displacement components on those facets, producing the two
+clamped ends.
+
+From a shell:
 
 ```bash
-julia --project=examples/01_clamped_beam_ferrite -e '
-  using Pkg; Pkg.develop(path="."); Pkg.instantiate();
-  include("examples/01_clamped_beam_ferrite/main.jl")'
+cd examples/01_clamped_beam_ferrite
+jupyter nbconvert --execute --to notebook --inplace clamped_beam.ipynb
+julia --project=. validate.jl
 ```
+
+Change `order = 3` to `order = 9` in the notebook to reproduce the conservative
+reference. Order 3 is an exact graded truncation of order 9, so `validate.jl`
+compares either result on their shared monomials against
+`reference_data/R_coefficients_ref.csv`.
+
+The optional save cell creates:
+
+```text
+results/
+  summary.txt
+  data/
+    W.jls
+    R.jls
+    R_coefficients.csv
+  figures/
+```
+
+[`reference_data/PROVENANCE.md`](reference_data/PROVENANCE.md) records how the
+committed notebook output and the order-9 reference were produced.
 
 ## Harmonic forcing
 
 `HarmonicForcing(mode = 1, amplitude = 0.03)` adds a load `f(t) = amplitude · M·ϕ₁ · cos(Ωt)`
 shaped like mode 1 and oscillating at mode 1's natural frequency (Ω defaults to `|λ₁|`;
-pass `Ω = ...` to detune). This appends two external states with eigenvalues ±iΩ
-(`N_EXT = 2`), following the forced setup of example 03 with `shape_mode == frequency_mode`:
+pass `Ω = ...` to detune). It is a **`build_model` keyword**, not a `parametrise` one:
+each forcing appends a conjugate pair of external states with eigenvalues ±iΩ, so
+`N_EXT = 2`, and `parametrise` stays the same physics-independent call as above.
 
 ```julia
-rom = SVK.parametrise(beam; master = [1], order = 9,
+(; model, spectral, meta) = build_model(case; master = [1], expansion_order = order,
     forcing = SVK.HarmonicForcing(mode = 1, amplitude = 0.03))
+W, R = parametrise(model, spectral, order;
+    resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
 ```
 
 Pass a **vector** for multi-harmonic excitation, `f(t) = Σₖ aₖ · M·ϕ_{pₖ} · cos(Ωₖ t)`.
@@ -46,55 +76,15 @@ Each forcing gets its own ±iΩₖ pair, so `N_EXT = 2 · length(forcing)` and f
 occupies reduced coordinates `ROM+2k-1`, `ROM+2k`:
 
 ```julia
-rom = SVK.parametrise(beam; master = [1], order = 9,
+ω₁ = abs(SVK.eigenfrequencies(case; nev = 10)[1])   # pair p sits at entries 2p-1, 2p
+(; model, spectral, meta) = build_model(case; master = [1], expansion_order = order,
     forcing = [SVK.HarmonicForcing(mode = 1, amplitude = 0.03),
                SVK.HarmonicForcing(mode = 1, amplitude = 0.01, Ω = 3.0 * ω₁)])
 ```
 
-The forcing mode only supplies the load shape and need not be a master mode, but
-`parametrise` warns when a forcing is near-resonant with a mode left off the manifold
-*and* actually excites it — that makes the slave-direction solve near-singular.
-`rom.forcing` and `rom.info.Ω` are vectors (empty when autonomous).
-
-## Under the hood
-
-`low_level.jl` builds the SAME ROM fully explicitly (FE setup, eigensolver,
-multiindex set, resonance set, cohomological solve) — use it to customise any
-stage. The two paths must produce identical reduced dynamics; this is enforced
-by the `structural_svk` test group (`GROUP=structural_svk julia --project test/runtests.jl`)
-and the gate scripts in `test/StructuralSVK/`.
-
-## Expected outputs
-
-```text
-results/
-  summary.txt              — model description, eigenfrequencies, forcing, timing, Julia version, git commit
-  data/
-    W.jls                  — parametrisation (serialised)
-    R.jls                  — complex reduced dynamics (serialised)
-    R_coefficients.csv     — reduced dynamics coefficients, one row per non-zero monomial
-  figures/                 — (empty; no figures generated by this example)
-```
-
-## Reference results
-
-Curated reference outputs live in `results/reference/` (tracked in git).
-Run `validate.jl` after a fresh run to compare against them:
-
-```bash
-julia --project=examples/01_clamped_beam_ferrite validate.jl
-```
-
-## Measured runtime
-
-< 1 min via `low_level.jl` (Julia 1.12.6, Apple M2, 16 GiB; first run including
-compilation). `main.jl` runs the identical pipeline; not yet measured separately.
-
-## Notes
-
-The Ferrite backend is loaded automatically via the `MORFEFerriteExt` package extension
-when `using Ferrite` is executed. The assembly functions `ferrite_assemble_KM!` and
-`ferrite_nonlinearity` are the public entry points defined in `ext/FerriteBackend/`.
-The high-level layer (`SVKMaterial`, `mechanical_model`, `parametrise`, `HarmonicForcing`)
-lives in `ext/StructuralSVK/` and loads when MORFE, Ferrite, FerriteGmsh, Arpack and
-LinearMaps are all in the session.
+The forcing mode only supplies the load shape and need not be a master mode. Separately,
+`parametrise` warns when any monomial's `s = ⟨λ, α⟩` lands near an eigenvalue left off the
+manifold — that direction is then solved through a near-singular operator. The test is on
+**frequency alone**, so it fires for autonomous models too and shaping the load away from
+the offending mode is no protection; detune the forcing, add damping, or add the mode to
+`master`. `meta` reports the resulting `N_EXT`, `Ω` and `forcings`.

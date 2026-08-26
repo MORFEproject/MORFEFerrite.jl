@@ -47,12 +47,17 @@ function build_model(m::AssembledParametricModel;
 
 	# Measured, not assumed: which θ-multiindices carry nothing. Silent when all do.
 	diagnostics && report_zero_coefficients(m; rtol = diagnostics_rtol)
+	# Method 4 is a geometric series and has a RADIUS. Outside it no truncation
+	# order converges, and the assembled model still looks well formed — so the
+	# range is measured here rather than left to the caller to discover. Silent
+	# for a volume-preserving transform, which is unconditionally convergent.
+	diagnostics && report_geometry_validity(m.pd.cache)
 
 	b = basis(m.pd)
 	sp = spectrum
 	ORD = model_order(m)
 	n_free = m.pd.n_free
-	N_EXT = m.n_geometry_parameters
+	N_EXT = m.n_external_parameters
 
 	# ── Linear terms: base coefficients, zero-padded to the augmented order ──
 	base_terms = [op.arrays[1] for op in m.operators]
@@ -63,10 +68,12 @@ function build_model(m::AssembledParametricModel;
 	# ── Nonlinear terms: the θ-expanded forms, then every α ≠ 0 correction ──
 	terms = Any[]
 	for (pm, arity) in zip(m.maps, m.map_arities)
-		append!(terms, multilinear_maps(pm; arity = arity))
+		append!(terms, multilinear_maps(pm; arity = arity,
+			external_components = m.external_components))
 	end
 	for op in m.operators
-		append!(terms, build_linear_corrections(op.arrays, b, op.arity))
+		append!(terms, build_linear_corrections(op.arrays, b, op.arity;
+			external_components = m.external_components))
 	end
 
 	# ── The frozen θ states ────────────────────────────────────────────────
@@ -89,6 +96,7 @@ function build_model(m::AssembledParametricModel;
 
 	meta = (; conjugate_permutation = perm, master_indices = master_indices,
 		N_EXT = N_EXT, n_geometry_parameters = m.n_geometry_parameters, ORD = ORD, spectrum = sp,
+		external_components = copy(m.external_components),
 		n_terms = length(terms), geometry_parameter_terms = nterms(b))
 	return (; model = model, spectral = sd, meta = meta)
 end

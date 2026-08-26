@@ -56,13 +56,14 @@ function _assemble_linear_element!(
 	cv_vel, cv_pres,
 	dof_range_u, dof_range_p,
 	Re0::Float64,
+	reference_length::Float64,
 )
 	fill!(Me, 0.0)
 	fill!(ALe, 0.0)
 
 	n_vel = length(dof_range_u)
 	n_pres = length(dof_range_p)
-	inv_Re = _CYL_D / Re0
+	inv_Re = reference_length / Re0
 
 	for q in 1:getnquadpoints(cv_vel)
 		dΩ = getdetJdV(cv_vel, q)
@@ -164,6 +165,7 @@ function assemble_linear_operators(s0_full, fom; Re0::Float64)
 			fom.cv_vel, fom.cv_pres,
 			fom.dof_range_u, fom.dof_range_p,
 			Re0,
+			fom.reference_length,
 		)
 
 		assemble!(asm_M, dofs, Me)
@@ -259,7 +261,7 @@ function compute_pressure_lift_weights(fom)
 	ip_geo = Lagrange{RefTriangle, 1}()
 	fv_pres = FacetValues(qr_face, ip_pres_f, ip_geo)
 
-	cyl_set = getfacetset(fom.grid, "Cylinder")
+	cyl_set = getfacetset(fom.grid, fom.obstacle_tag)
 
 	for (cell_idx, local_facet_idx) in cyl_set
 		cell = CellCache(fom.dh)

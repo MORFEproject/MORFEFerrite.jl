@@ -41,13 +41,14 @@ function _assemble_element!(
 	cv_vel, cv_pres,
 	dof_range_u, dof_range_p,
 	Re0::Float64,
+	reference_length::Float64,
 )
 	fill!(Ke, 0.0)
 	fill!(Re_e, 0.0)
 
 	n_vel = length(dof_range_u)
 	n_pres = length(dof_range_p)
-	inv_Re = _CYL_D / Re0
+	inv_Re = reference_length / Re0
 
 	for q in 1:getnquadpoints(cv_vel)
 		dΩ = getdetJdV(cv_vel, q)
@@ -146,6 +147,7 @@ function assemble_steady_nse!(K, R, s_full, fom, Re0::Float64)
 			fom.cv_vel, fom.cv_pres,
 			fom.dof_range_u, fom.dof_range_p,
 			Re0,
+			fom.reference_length,
 		)
 
 		assemble!(asm, dofs, Ke, Re_e)
@@ -167,8 +169,8 @@ Returns:
   p0_free  — free-DOF pressure base flow             (length n_p_free)
   s0_full  — full-DOF solution vector (including prescribed BCs)
 
-The initial guess is the exact Poiseuille profile at the inlet with zero in the
-interior, or `s_init` (a full-DOF vector) when given — used to warm-start a
+The initial guess applies the selected inhomogeneous velocity boundary policy
+with zero interior values, or uses `s_init` (a full-DOF vector) when given — used to warm-start a
 continuation in Re, e.g. following the (unstable) steady branch above Re_c.
 Convergence is monitored by the free-DOF residual ℓ²-norm.
 """
@@ -180,7 +182,7 @@ function solve_steady_state(fom; Re0::Float64, tol::Float64 = 1e-10, max_iter::I
 	K_full = allocate_matrix(fom.dh)
 	R_full = zeros(N)
 
-	# Initial guess: Poiseuille BCs everywhere with zero interior, or warm start
+	# Initial guess: prescribed base-flow BCs with zero interior, or warm start
 	s_full = s_init === nothing ? zeros(N) : copy(s_init)
 	apply!(s_full, fom.ch_full)   # sets prescribed DOFs to Poiseuille / no-slip
 
@@ -255,7 +257,7 @@ cylinder boundary.  Reference values (Turek–Schäfer benchmark, Re = 20):
   Cd ≈ 5.57,  Cl ≈ 0.011.
 """
 function compute_drag_lift(s_full, fom; Re0::Float64)
-	D = 2.0 * _CYL_R
+	D = fom.reference_length
 	U = U_MEAN
 	ref = U^2 * D   # reference force (per unit depth, ρ = 1): Cd = 2·F/(ρ·U²·D)
 
@@ -271,7 +273,7 @@ function compute_drag_lift(s_full, fom; Re0::Float64)
 	ip_pres_f = Lagrange{RefTriangle, 1}()
 	fv_pres = FacetValues(qr_face, ip_pres_f, ip_geo)
 
-	cyl_set = getfacetset(fom.grid, "Cylinder")
+	cyl_set = getfacetset(fom.grid, fom.obstacle_tag)
 
 	for (cell_idx, local_facet_idx) in cyl_set
 		element = CellIterator(fom.dh)
@@ -294,7 +296,7 @@ function compute_drag_lift(s_full, fom; Re0::Float64)
 			p_q = function_value(fv_pres, q, p_e)
 
 			# Stress tensor: σ = -p I + (1/Re₀)(∇u + ∇u^T)
-			σ = -p_q * one(∇u_q) + (_CYL_D/Re0) * (∇u_q + transpose(∇u_q))
+			σ = -p_q * one(∇u_q) + (fom.reference_length/Re0) * (∇u_q + transpose(∇u_q))
 			traction = σ ⋅ n   # Vec{2}
 
 			Fd += traction[1] * dΓ   # x-component → drag

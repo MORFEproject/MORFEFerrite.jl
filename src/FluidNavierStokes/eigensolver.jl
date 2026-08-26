@@ -77,7 +77,8 @@ _normalise_pair(::NoNormalisation, φ, ψ, α) = (φ, ψ)
 	solve_hopf_eigenproblem(A_lin, B_mass; nev, sigma_re, sigma_im,
 							target_freq = nothing,
 							normalisation = SymmetricBiorthogonal(),
-							scale = 1.0, verbose = true)
+							scale = 1.0, tol = 0.0, maxiter = 3000,
+							ncv = nothing, verbose = true)
 		-> (; eigenvalues, right_modes, left_modes, all_eigenvalues, all_modes)
 
 Compute `nev` eigenvalues of `A_lin y = λ B_mass y` by shift-invert ARPACK and
@@ -85,6 +86,8 @@ return the Hopf conjugate pair with its adjoint.
 
 `sigma_re` offsets the shift from the imaginary axis; `sigma_im` targets a
 frequency band. Neither affects which mode is selected — only the factorisation.
+`tol`, `maxiter`, and `ncv` are forwarded to ARPACK. Their defaults preserve
+the historical solver configuration.
 
 The Hopf mode is the eigenvalue with the smallest `|Re λ|` among those with
 `Im λ > 0`. That heuristic is reliable **near** `Re_c`, where the shedding mode
@@ -115,11 +118,21 @@ function solve_hopf_eigenproblem(
 	target_freq::Union{Nothing, Float64} = nothing,
 	normalisation::AbstractModeNormalisation = SymmetricBiorthogonal(),
 	scale::Real = 1.0,
+	tol::Real = 0.0,
+	maxiter::Int = 3000,
+	ncv::Union{Nothing, Int} = nothing,
 	verbose::Bool = true,
 )
 	n = size(A_lin, 1)
+	0 <= tol < 1 || throw(ArgumentError("tol must satisfy 0 <= tol < 1"))
+	maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
+	nev > 0 || throw(ArgumentError("nev must be positive"))
+	nev < n || throw(ArgumentError("nev must be smaller than the matrix dimension"))
+	ncv_used = isnothing(ncv) ? min(max(nev + 30, 120), n - 1) : Int(ncv)
+	nev + 1 <= ncv_used <= n - 1 || throw(ArgumentError(
+		"ncv must satisfy nev + 1 <= ncv <= n - 1"))
 	sigma = complex(sigma_re, sigma_im)
-	verbose && println("  Shift σ = $sigma,  nev = $nev,  n = $n")
+	verbose && println("  Shift σ = $sigma,  nev = $nev,  ncv = $ncv_used,  n = $n")
 
 	# ── Shift-invert factorisation ─────────────────────────────────────────────
 	Ac = complex.(A_lin)
@@ -128,8 +141,8 @@ function solve_hopf_eigenproblem(
 	LM = LinearMap{ComplexF64}(n, n; ismutating = false) do x
 		F \ (Bc * x)
 	end
-	mu, vecs, = eigs(LM; nev = nev, which = :LM, maxiter = 3000,
-		ncv = min(max(nev + 30, 120), n - 1))
+	mu, vecs, = eigs(LM; nev = nev, which = :LM, maxiter, ncv = ncv_used,
+		tol = Float64(tol))
 
 	# Guard against zero mu (spurious pressure modes of the descriptor system).
 	tiny = eps(Float64)

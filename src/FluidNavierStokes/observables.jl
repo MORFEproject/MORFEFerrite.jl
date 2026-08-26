@@ -165,7 +165,8 @@ end
 	export_vtk_bundle(data_dir, fom, s0_full, master_eigenvalues, all_eigenvalues, all_modes)
 
 Serialise a plain-array bundle (mesh, DOF maps, base flow, eigenmodes — no Ferrite
-types) for external ParaView/VTU export tooling.
+types) for external ParaView/VTU export tooling. For a direct quadratic VTU
+export, load WriteVTK and call [`write_paraview_p2p1`](@ref) with the same FOM.
 """
 function export_vtk_bundle(data_dir::AbstractString, fom, s0_full,
 		master_eigenvalues, all_eigenvalues, all_modes)

@@ -16,21 +16,22 @@ Expected numbers: see README.md (asserted by validate.jl).
 using Pkg: Pkg
 Pkg.activate(@__DIR__)
 if !isfile(joinpath(@__DIR__, "Manifest.toml"))
-	# One-time environment setup. MORFE.jl is expected as a sibling checkout
-	# (folder MORFE.jl or MORFE_jl), next to this repository or one directory
-	# above it; override with ENV["MORFE_PATH"]. Collapses to plain
-	# Pkg.instantiate() once the packages are registered.
-	morfe = get(ENV, "MORFE_PATH", "")
-	if isempty(morfe)
-		cands = [joinpath(@__DIR__, "..", "..", "..", n) for n in ("MORFE.jl", "MORFE_jl")]
-		append!(cands, [joinpath(@__DIR__, "..", "..", "..", "..", n) for n in ("MORFE.jl", "MORFE_jl")])
-		morfe = first(filter(isdir, cands))
-	end
-	Pkg.develop([
-		Pkg.PackageSpec(path = morfe),
-		Pkg.PackageSpec(path = joinpath(@__DIR__, "..", "..")),
-	])
-	Pkg.add(["Ferrite", "FerriteGmsh", "Arpack", "LinearMaps", "StaticArrays"])
+    # One-time environment setup. MORFE.jl is expected as a sibling checkout
+    # (folder MORFE.jl or MORFE_jl), next to this repository or one directory
+    # above it; override with ENV["MORFE_PATH"]. Collapses to plain
+    # Pkg.instantiate() once the packages are registered.
+    morfe = get(ENV, "MORFE_PATH", "")
+    if isempty(morfe)
+        cands = [joinpath(@__DIR__, "..", "..", "..", n) for n in ("MORFE.jl", "MORFE_jl")]
+        append!(cands, [joinpath(@__DIR__, "..", "..", "..", "..", n)
+                        for n in ("MORFE.jl", "MORFE_jl")])
+        morfe = first(filter(isdir, cands))
+    end
+    Pkg.develop([
+        Pkg.PackageSpec(path = morfe),
+        Pkg.PackageSpec(path = joinpath(@__DIR__, "..", ".."))
+    ])
+    Pkg.add(["Ferrite", "FerriteGmsh", "Arpack", "LinearMaps", "StaticArrays"])
 end
 Pkg.instantiate()
 
@@ -54,23 +55,23 @@ FORCING = nothing              # or SVK.HarmonicForcing(mode = 1, amplitude = 0.
 # ── PIPELINE — generic; no need to edit ──────────────────────────────────────
 # ## Assemble the mechanical model (K, M, C on free DOFs + SVK nonlinearity)
 model_case = SVK.mechanical_model(MESH;
-	material = MATERIAL, damping = DAMPING, dirichlet = DIRICHLET,
-	fe_order = FE_ORDER, quad_order = QUAD_ORDER)
+    material = MATERIAL, damping = DAMPING, dirichlet = DIRICHLET,
+    fe_order = FE_ORDER, quad_order = QUAD_ORDER)
 
 # ## Compute the invariant-manifold ROM.
 # Three steps, deliberately: MORFEFerrite contributes `build_model` — the single
 # contract every physics backend implements — and MORFE owns `parametrise`. There
 # is no backend-specific `parametrise` wrapping the two.
 (; model, spectral, meta) = build_model(model_case;
-	master = MASTER, forcing = FORCING, expansion_order = ORDER)
+    master = MASTER, forcing = FORCING, expansion_order = ORDER)
 
 t_solve = @elapsed W, R = parametrise(model, spectral, ORDER;
-	resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
+    resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
 
-rom = SVK.InvariantManifoldROM(W, R, meta; master = MASTER, order = ORDER,
-	info = (; solve_time_s = t_solve))
-
-# ## Report the realified reduced dynamics and save the standard result layout
-SVK.print_equations(rom)
-SVK.save_rom(rom, joinpath(@__DIR__, "results"))
-println("\nResults written to $(joinpath(@__DIR__, "results"))")
+# ## Save the physics-independent result and append the structural summary.
+results_dir = joinpath(@__DIR__, "results")
+MORFE.save_rom(results_dir, W, R)
+MORFEFerrite.write_summary(stdout, joinpath(results_dir, "summary.txt"), model_case;
+    rom = (; meta..., solve_time_s = t_solve),
+    metadata = Pair{String, Any}["parametrisation_order" => ORDER])
+println("\nResults written to $results_dir")

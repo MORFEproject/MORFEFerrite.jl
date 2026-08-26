@@ -9,7 +9,8 @@
 
 using ..ParametricGeometry: PullbackCache, ParametricDiscretisation, ParametricMap,
 	ParametricOperator, AssembledParametricModel, assemble_linear_series!,
-	GeometryParameterBasis, nterms
+	GeometryParameterBasis, nterms, AbstractInverseDeterminant, PowerSeriesInverseDet,
+	free_dof_map
 
 """
 	parametric_model(dh, cv, geometry; geometry_parameter_basis, material, damping,
@@ -39,13 +40,18 @@ function parametric_model(dh, cv, geometry;
 	material,
 	damping::RayleighDamping,
 	free::Union{Nothing, AbstractVector{Int}} = nothing,
-	base = nothing)
+	base = nothing,
+	inverse_determinant::AbstractInverseDeterminant = PowerSeriesInverseDet())
 	bases = _geometry_parameter_bases(geometry_parameter_basis)
 	stress = stress_model(material)
 	ρ = Float64(material.ρ)
 
 	freedofs = free === nothing ? collect(1:ndofs(dh)) : collect(free)
+	# The parametric assembly path indexes a dense vector (one lookup per DOF per
+	# cell per θ-coefficient); `info` keeps the `Dict` form, which is what
+	# `free_dofs_at_nodes` and the VTK extension consume.
 	free_to_local = Dict(d => i for (i, d) in enumerate(freedofs))
+	f2l = free_dof_map(ndofs(dh), freedofs)
 	n_free = length(freedofs)
 
 	# One geometry cache per DISTINCT θ-basis, carrying every inverse-determinant
@@ -53,8 +59,8 @@ function parametric_model(dh, cv, geometry;
 	# by (1/det J)², the cubic by (1/det J)³, the linear operators by the raw
 	# 1/det J series (which every cache holds). When all three bases coincide —
 	# the usual case — this is one cache and one sweep of the geometry.
-	caches = _pullback_caches(dh, cv, geometry, bases)
-	pd_lin = ParametricDiscretisation(dh, cv, free_to_local, n_free, caches.linear)
+	caches = _pullback_caches(dh, cv, geometry, bases, inverse_determinant)
+	pd_lin = ParametricDiscretisation(dh, cv, f2l, n_free, caches.linear)
 
 	# ── Linear operators: assemble K(θ) and M(θ), then form C(θ) from them ──
 	L = nterms(bases.linear)
@@ -72,8 +78,8 @@ function parametric_model(dh, cv, geometry;
 	]
 
 	# ── Nonlinear forms ────────────────────────────────────────────────────
-	pd_q = ParametricDiscretisation(dh, cv, free_to_local, n_free, caches.quadratic)
-	pd_c = ParametricDiscretisation(dh, cv, free_to_local, n_free, caches.cubic)
+	pd_q = ParametricDiscretisation(dh, cv, f2l, n_free, caches.quadratic)
+	pd_c = ParametricDiscretisation(dh, cv, f2l, n_free, caches.cubic)
 	maps = [ParametricMap(pd_q, SVKPullbackKernel{2}(stress, ρ)),
 		ParametricMap(pd_c, SVKPullbackKernel{3}(stress, ρ))]
 	map_arities = [(2, 0, 0), (3, 0, 0)]
@@ -89,14 +95,15 @@ end
 # Build one PullbackCache per distinct θ-basis, each carrying the union of the
 # inverse-determinant powers the forms over it need. Bases are compared by
 # identity: sharing one object is how a caller says "same truncation".
-function _pullback_caches(dh, cv, geometry, bases)
+function _pullback_caches(dh, cv, geometry, bases, inverse_determinant)
 	needed = [(bases.linear, Int[]), (bases.quadratic, [2]), (bases.cubic, [3])]
 	uniq = Tuple{GeometryParameterBasis, Vector{Int}}[]
 	for (b, pw) in needed
 		i = findfirst(u -> u[1] === b, uniq)
 		i === nothing ? push!(uniq, (b, copy(pw))) : append!(uniq[i][2], pw)
 	end
-	built = [(b, PullbackCache(dh, cv, geometry, b; det_powers = unique(pw)))
+	built = [(b, PullbackCache(dh, cv, geometry, b; det_powers = unique(pw),
+				  inverse_determinant = inverse_determinant))
 			 for (b, pw) in uniq]
 	pick(b) = built[findfirst(u -> u[1] === b, built)][2]
 	return (; linear = pick(bases.linear), quadratic = pick(bases.quadratic),

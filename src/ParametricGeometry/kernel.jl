@@ -27,13 +27,13 @@ wrapping of each θ-coefficient as a MORFE `MultilinearMap`.
 The `p` in the `(1/det J)^p` weighting of this form's integrand. The driver
 multiplies by it; the kernel must not.
 
-	qp_prepare(k, ctx, ∇u_adj::NTuple{DEG, Vector{Tens3}}) -> state
+	qp_prepare(k, ctx, ∇u_adj::NTuple{DEG, Vector{<:Tensor{2,dim}}}) -> state
 
 Whatever the integrand needs once per quadrature point, independent of the test
 function — stresses, strain cross-terms. Returning it separately is what keeps
 that work out of the inner basis-function loop.
 
-	qp_integrand!(integ, k, ctx, state, ∇N_adj::Vector{Tens3}) -> integ
+	qp_integrand!(integ, k, ctx, state, ∇N_adj::Vector{<:Tensor{2,dim}}) -> integ
 
 The θ-series of the integrand for one test function, written into `integ`
 (length `nterms(ctx.basis)`), **before** the determinant weighting.
@@ -66,11 +66,11 @@ A nonlinear kernel normally leaves the determinant weighting to the driver (see
 [`det_weight_power`](@ref)) and never touches `det`/`inv_det`; a linear-operator
 kernel weights its own entries, since stiffness and mass carry different powers.
 """
-struct QPContext{Nθ, CV}
+struct QPContext{Nθ, TT, CV}
 	cv::CV
 	q::Int
 	basis::GeometryParameterBasis{Nθ}
-	adj::Vector{Tens3}
+	adj::Vector{TT}
 	det::Vector{Float64}
 	inv_det::Vector{Float64}
 end
@@ -82,6 +82,16 @@ nterms(ctx::QPContext) = nterms(ctx.basis)
 # coordinate transform applied to a gradient, and it is the ONLY place the
 # transform touches a field quantity.
 ∇adj_series(∇u, adj_ser::Vector) = [∇u ⋅ a for a in adj_ser]
+
+# In-place form for the assembly hot path, where this runs once per basis
+# function per quadrature point per cell and the allocating form dominated the
+# profile. `out` must already be length `length(adj_ser)`.
+@inline function ∇adj_series!(out::AbstractVector, ∇u, adj_ser::Vector)
+	@inbounds for i in eachindex(adj_ser)
+		out[i] = ∇u ⋅ adj_ser[i]
+	end
+	return out
+end
 
 # --- interface fallbacks ---------------------------------------------
 det_weight_power(k::AbstractPullbackKernel) = throw(MethodError(det_weight_power, (k,)))

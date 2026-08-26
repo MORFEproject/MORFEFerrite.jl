@@ -43,13 +43,12 @@ export load_comsol_grid, AbstractAssembledModel, build_model
 # The shared run-summary writer and its per-physics dispatch seam.
 export write_summary, summary_entries
 export write_paraview_mesh, write_paraview_modes,
-	write_paraview_manifold, write_paraview_deformation
+       write_paraview_manifold, write_paraview_deformation, write_paraview_p2p1,
+       write_paraview_p2p1_phase_animation
 
-# Re-export the StructuralSVK public API. `save_rom` is intentionally NOT
-# re-exported here: it clashes with the `save_rom(dirs, W, R)` helper that the
-# low-level example includes from `examples/common/results_io.jl`. Reach it as
-# `MORFEFerrite.save_rom` or `MORFEFerrite.StructuralSVK.save_rom`.
+# Re-export the StructuralSVK model-building API. Reduced models are always the
+# physics-independent `(W, R)` returned by `MORFE.parametrise`.
 export SVKMaterial, RayleighDamping, HarmonicForcing,
-	mechanical_model, real_dynamics, print_equations
+       mechanical_model
 
 end # module MORFEFerrite

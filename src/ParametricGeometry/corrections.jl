@@ -45,7 +45,8 @@ For a second-order structure on the augmented `ORD = 3` model:
 first-order physics, `(1,)`.
 """
 function build_linear_corrections(A_arr::Vector, basis::GeometryParameterBasis,
-	arity::NTuple{N, Int}) where {N}
+	arity::NTuple{N, Int};
+	external_components = collect(1:length(basis.mset.exponents[1]))) where {N}
 	sum(arity) == 1 || throw(ArgumentError(
 		"a linear correction acts on exactly one modal argument, but arity $arity " *
 		"sums to $(sum(arity))"))
@@ -61,7 +62,8 @@ function build_linear_corrections(A_arr::Vector, basis::GeometryParameterBasis,
 		mm = sum(α)
 		mm <= _PG_MAX_EXT || throw(ArgumentError(
 			"θ-multiindex $α has total degree $mm > _PG_MAX_EXT = $_PG_MAX_EXT"))
-		cl = Base.invokelatest(_pg_linear, Val(mm), _expand_multiindex(α), A)
+		cl = Base.invokelatest(_pg_linear, Val(mm),
+			_expand_multiindex(α, external_components), A)
 		push!(corr, MultilinearMap(cl, arity, mm))
 	end
 	return corr

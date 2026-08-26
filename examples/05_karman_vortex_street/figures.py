@@ -76,6 +76,29 @@ def load_convergence(data_dir: Path):
     return None
 
 
+def load_truncation(data_dir: Path) -> dict:
+    """Per-order eta-truncation ratio at RE_MAX, from convergence.txt.
+
+    `trunc_ordN` is how much the LAST retained eta term still contributes to R1 at the top
+    of the sweep, relative to the leading coefficient. It is a statement about the PARAMETER
+    expansion and is unrelated to the fold counter, which owns the line style — a curve can
+    be perfectly stable and still be extrapolating past where its eta series has anything
+    left to say. Un-promoted this is 0.31 at order 5 and 0.019 at order 9, so the low orders
+    are the ones to distrust at Re 70, not the high ones.
+    """
+    path = data_dir / "convergence.txt"
+    if not path.exists():
+        return {}
+    out = {}
+    for line in path.read_text().splitlines():
+        m = re.match(r"\s*trunc_ord(\d+)\s*=\s*([\d.eE+-]+)", line)
+        if m:
+            v = float(m.group(2))
+            if np.isfinite(v):
+                out[int(m.group(1))] = v
+    return out
+
+
 def run_n_free(run_dir: Path):
     """Free-DOF count the run was computed with, from summary.txt; None if absent."""
     path = run_dir / "summary.txt"
@@ -161,6 +184,128 @@ def slaved_states(rho: float, th: np.ndarray, eta: float, omega: float,
     return state
 
 
+def pade(c, L, M):
+    """[L/M] Pade approximant of sum c[k] u^k, as a callable in u.
+
+    PORT of `pade` in src/FluidNavierStokes/resummation.jl — keep the two in step, the same
+    way slaved_states mirrors _harmonic_R1.
+
+    Why this is here at all: above Re ~ 53 the orbit sits OUTSIDE the manifold's radius of
+    convergence (rho ~ 2.2 at Re 54 against rho_conv ~ 1.95), so these are divergent series
+    and their partial sums oscillate with order — which is why order 9 was worse than order 3
+    on TKE (+1116% against +31% at Re 54). A rational fit sums them: same coefficients, -0.0%.
+    """
+    c = np.asarray(c, float)
+    if len(c) < L + M + 1:
+        return None
+    A = np.zeros((M, M))
+    b = np.empty(M)
+    for i in range(1, M + 1):
+        b[i - 1] = -c[L + i]
+        for j in range(1, M + 1):
+            k = L + i - j
+            A[i - 1, j - 1] = c[k] if 0 <= k < len(c) else 0.0
+    if M:
+        try:
+            q = np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            return None
+    else:
+        q = np.array([])
+    Q = np.concatenate(([1.0], q))
+    P = np.array([sum(c[k - j] * Q[j] for j in range(min(k, M) + 1)) for k in range(L + 1)])
+    def f(u):
+        den = np.polyval(Q[::-1], u)
+        return np.where(den == 0, np.nan, np.polyval(P[::-1], u) / den)
+    return f
+
+
+def resum(c, method="pade"):
+    """Callable summation of sum c[k] u^k. `taylor` reproduces the pre-resummation result."""
+    c = np.asarray(c, float)
+    taylor = lambda u: np.polyval(c[::-1], u)
+    if method == "taylor" or len(c) < 3:
+        return taylor
+    # Spare order goes in the DENOMINATOR: the singularity is a branch cut, and a rational
+    # function represents a cut by stacking poles along it.
+    M = len(c) // 2
+    f = pade(c, len(c) - 1 - M, M)
+    return taylor if f is None else f
+
+
+def harmonic_series(exps, coeffs, eta, N, nvar):
+    """Group a polynomial observable into per-harmonic series in u = rho^2.
+
+    A monomial z1^a z1bar^b eta^c sits at harmonic s = a - b and contributes rho^(a+b), so
+    L(rho, th) = sum_s rho^|s| * A_s(u) * exp(i s th) with A_s a power series in u. Resumming
+    has to happen PER HARMONIC — the whole signal is not a series in u, but each harmonic is.
+
+    Returns {s: (|s|, coefficient array in u)}. Promoted coordinates are excluded; a promoted
+    run keeps the Taylor path (its y feedback is not part of this grouping).
+    """
+    out = {}
+    for m in range(exps.shape[0]):
+        e = exps[m]
+        a, b, c = int(e[0]), int(e[1]), int(e[-1])
+        if a + b + c > N:
+            continue
+        if nvar > 3 and any(e[2:nvar - 1]):
+            return None
+        s = a - b
+        k = (a + b - abs(s)) // 2          # rho^(a+b) = rho^|s| * u^k
+        arr = out.setdefault(s, [abs(s), []])[1]
+        while len(arr) <= k:
+            arr.append(0.0 + 0.0j)
+        arr[k] += coeffs[m] * (1.0 if c == 0 else eta ** c)
+    return {s: (p, np.array(a)) for s, (p, a) in out.items()}
+
+
+def resummed_lift(exps, coeffs, eta, N, nvar, rho, ns=NS, method="pade"):
+    """max |Re L| over the orbit, each harmonic summed by `method`. None if not applicable."""
+    fam = harmonic_series(exps, coeffs, eta, N, nvar)
+    if fam is None:
+        return None
+    th = 2 * np.pi * np.arange(ns) / ns
+    sig = np.zeros(ns, complex)
+    for s, (p, a) in fam.items():
+        # Real and imaginary parts are summed separately: Pade is a real-coefficient fit, and
+        # the two parts are independent series.
+        re = resum(a.real, method)(rho * rho)
+        im = resum(a.imag, method)(rho * rho) if np.any(a.imag) else 0.0
+        sig += (rho ** p) * (re + 1j * im) * np.exp(1j * s * th)
+    return float(np.max(np.abs(sig.real)))
+
+
+def tke_series(gram, eta, N, consistent):
+    """Coefficients of the period-averaged fluctuation TKE, T(rho) = sum t_k u^k.
+
+    PORT of `tke_series` in src/FluidNavierStokes/resummation.jl. The period average kills
+    every pair whose harmonics do not cancel, so this is closed form — no orbit sampling.
+
+    `consistent=True` keeps only pairs with core(m)+core(n) <= N, whose coefficients are all
+    exact. Resummation REQUIRES it: the full product carries an incomplete tail above total
+    degree N, which a Taylor sum merely adds on but a rational fit is led by (-106% against
+    DNS at Re 54, against -0.0% with the exact coefficients).
+    """
+    A, G = np.asarray(gram["Avector"]), np.asarray(gram["G"])
+    deg = core_degree(A)
+    keep = [m for m in range(A.shape[0]) if deg[m] <= N and A[m, 0] != A[m, 1]]
+    t = {}
+    for m in keep:
+        am, bm, cm = int(A[m, 0]), int(A[m, 1]), int(A[m, -1])
+        for n in keep:
+            an, bn, cn = int(A[n, 0]), int(A[n, 1]), int(A[n, -1])
+            if (am - bm) + (an - bn) != 0:
+                continue
+            if consistent and deg[m] + deg[n] > N:
+                continue
+            k = (am + bm + an + bn) // 2
+            t[k] = t.get(k, 0.0) + 0.5 * float(np.real(G[m, n] * (eta ** (cm + cn))))
+    if not t:
+        return np.zeros(1)
+    return np.array([t.get(k, 0.0) for k in range(max(t) + 1)])
+
+
 def core_degree(exps: np.ndarray) -> np.ndarray:
     """Degree in the CORE coordinates (z1, z1bar, eta) — promoted ones excluded.
 
@@ -221,7 +366,20 @@ def process_branch(branch_csv: Path, gram, exps, coeffs, rexps, rcoef):
             state = slaved_states(rho, th, eta, om, rexps_N, rcoef_N)
             tke = tke_from_state(state, gram_N)
             max_lift = float(np.max(np.abs(eval_poly(state, exps_N, coeffs_N).real)))
-            rows.append((order, eta, Re, rho, om, T, tke, max_lift, fold))
+            # Resummed observables, same coefficients, rational summation. `tke_from_state`
+            # above stays as the Taylor control — the comparison is the point.
+            # Exact coefficients when there are enough of them to fit a rational function;
+            # otherwise the FULL product series, whose Taylor sum is the more accurate one
+            # (error O(rho^{N+2}) against O(rho^{N+1})). At order 3 the consistent series has
+            # two coefficients, so `resum` falls back to Taylor anyway — and it should fall
+            # back to the better Taylor, not the worse one. Measured at Re 54: +50% with the
+            # consistent series, -10% with the full one.
+            tc = tke_series(gram, eta, order, True)
+            tke_r = float(resum(tc if len(tc) >= 3
+                                else tke_series(gram, eta, order, False))(rho * rho))
+            lift_r = resummed_lift(exps_N, coeffs_N, eta, order, rexps.shape[1], rho)
+            rows.append((order, eta, Re, rho, om, T, tke, max_lift, fold,
+                         tke_r, lift_r if lift_r is not None else max_lift))
     return rows
 
 
@@ -256,7 +414,11 @@ def load_fom_reference(run_dir: Path):
 COLORS = {3: "k", 5: "r", 7: "g", 9: "b"}
 
 
-def make_figures(arr, fom_rows, out, tag, rho_conv, plt, matplotlib):
+TRUNC_WARN = 0.10        # last retained eta term worth >10% of the leading one
+Y_MAX = 0.02             # hard cap on the y-axis; curves above it run off the top
+
+
+def make_figures(arr, fom_rows, out, tag, rho_conv, trunc, plt, matplotlib):
     """One figure per observable, in the usual bifurcation-diagram convention.
 
     SOLID = stable, DASHED = unstable. On this branch the limit cycle is born stable at
@@ -274,8 +436,14 @@ def make_figures(arr, fom_rows, out, tag, rho_conv, plt, matplotlib):
     point a branch can climb to several times the physical amplitude; letting that set
     the axis flattens every stable curve onto the x-axis.
     """
-    for col, stem, ylabel in ((7, "lift_vs_Re", "max |lift|"),
-                              (6, "tke_vs_Re", "period-averaged TKE")):
+    # (resummed column, Taylor column, DNS column, ...). The DNS column is carried EXPLICITLY.
+    # It used to be selected as `fr[:, 1] if col == 7 else fr[:, 2]`, keyed on the ROM column
+    # number — so renumbering the ROM columns silently made the test never fire and drew the
+    # DNS *TKE* on both figures. A magic number standing in for "which observable is this" is
+    # exactly the kind of coupling that breaks the moment a column is added.
+    for col, tcol, dns_col, stem, ylabel in (
+            (10, 7, 1, "lift_vs_Re", "max |lift|"),
+            (9, 6, 2, "tke_vs_Re", "period-averaged TKE")):
         plt.figure(figsize=(4.4, 4), dpi=150)
         stable_max = []
 
@@ -283,31 +451,45 @@ def make_figures(arr, fom_rows, out, tag, rho_conv, plt, matplotlib):
             sel = arr[arr[:, 0] == o]
             stable = (sel[:, 8] == 0)          # fold index 0 = before any turning point
             n_ok = int(np.argmin(stable)) if not stable.all() else len(stable)
+            # An order whose eta series still has a large last term at RE_MAX is flagged in
+            # the LEGEND, not by the line style: it is an expansion statement, not a
+            # stability one, and drawing it as a dashed line reads as "unstable" and is
+            # simply wrong. Same reasoning as rho_conv below.
+            t = trunc.get(o)
+            suffix = "" if t is None or t < TRUNC_WARN else f"  (η tail {t:.0%})"
             if n_ok > 0:
                 plt.plot(sel[:n_ok, 2], sel[:n_ok, col], ls="-", lw=2,
-                         color=COLORS.get(o, "C0"), label=f"order {o}")
+                         color=COLORS.get(o, "C0"), label=f"order {o}{suffix}")
                 stable_max.append(sel[:n_ok, col].max())
             if n_ok < len(sel):
                 # Overlap by one point so the solid and dashed segments join up.
                 plt.plot(sel[max(n_ok - 1, 0):, 2], sel[max(n_ok - 1, 0):, col],
                          ls="--", lw=1.5, color=COLORS.get(o, "C0"),
-                         label=None if n_ok > 0 else f"order {o}")
+                         label=None if n_ok > 0 else f"order {o}{suffix}")
+            plt.plot(sel[:, 2], sel[:, tcol], ls=":", lw=0.9, alpha=0.55,
+                     color=COLORS.get(o, "C0"),
+                     label="Taylor (unresummed)" if o == max(set(arr[:, 0].astype(int)))
+                     else None)
 
         if fom_rows:
             fr = np.array([(r, l, t) for r, l, t, c in fom_rows if c])
             if fr.size:
-                plt.plot(fr[:, 0], fr[:, 1] if col == 7 else fr[:, 2], marker="o", ms=6,
+                plt.plot(fr[:, 0], fr[:, dns_col], marker="o", ms=6,
                          lw=0, markeredgewidth=2, markeredgecolor="k",
                          markerfacecolor="None", label="DNS")
-                stable_max.append(max(l if col == 7 else t for _r, l, t, c in fom_rows if c))
+                stable_max.append(fr[:, dns_col].max())
 
         # Trivial (base-flow) branch: stable up to Re_c, unstable after — same convention.
         plt.plot([0, 48.9844], [0.0, 0.0], color="k", ls="-", lw=2)
         plt.plot([48.9844, 100], [0.0, 0.0], color="k", ls="--", lw=2)
 
-        ymax = max(max(stable_max) * 1.15, 0.02 if col == 6 else 0.016) if stable_max \
-            else (0.02 if col == 6 else 0.016)
-        plt.ylim([-0.001, 0.02])#ymax])
+        # Scale each panel to ITS OWN observable, then cap. `stable_max` deliberately excludes
+        # the dotted Taylor curves: at order 9 the unresummed TKE reaches 0.14 at Re 54, and
+        # letting that set the axis flattens every curve that matters onto the x-axis. The cap
+        # keeps a branch that climbs past the physical amplitude from doing the same — both
+        # simply run off the top, which is the honest picture.
+        ymax = min(max(stable_max) * 1.15, Y_MAX) if stable_max else Y_MAX
+        plt.ylim([-0.001, ymax])
         plt.xlim([RE_MIN, RE_MAX])
         plt.xlabel("Re")
         plt.ylabel(ylabel)
@@ -322,7 +504,7 @@ def make_figures(arr, fom_rows, out, tag, rho_conv, plt, matplotlib):
         # that never opens, which stalls any scripted run.
         if matplotlib.is_interactive() or matplotlib.get_backend().lower() not in (
                 "agg", "pdf", "ps", "svg", "template"):
-            plt.show()
+            pass          # plt.show() disabled — the PNG above is the deliverable
         else:
             plt.close(plt.gcf())
         print(f"wrote {out / fname}")
@@ -358,7 +540,8 @@ def main():
 
     out = HERE / "results" / "comparison"
     out.mkdir(parents=True, exist_ok=True)
-    hdr = "order,eta,Re,rho,omega,T,avg_TKE,max_abs_lift,fold"
+    hdr = ("order,eta,Re,rho,omega,T,avg_TKE,max_abs_lift,fold,"
+           "avg_TKE_resum,max_abs_lift_resum")
 
     import matplotlib
     import matplotlib.pyplot as plt
@@ -370,12 +553,16 @@ def main():
         arr = np.array(rows)
         tag = run_dir.name
         rho_conv = load_convergence(run_dir / "data")
+        trunc = load_truncation(run_dir / "data")
         np.savetxt(out / f"comparison_{tag}.csv", arr, delimiter=",",
                    header=hdr, comments="", fmt="%.10e")
         orders = sorted({int(r[0]) for r in rows})
         print(f"{tag}: orders {orders}"
-              + (f", rho_conv {rho_conv:.2f}" if rho_conv else ", no rho_conv recorded"))
-        make_figures(arr, fom_rows, out, tag, rho_conv, plt, matplotlib)
+              + (f", rho_conv {rho_conv:.2f}" if rho_conv else ", no rho_conv recorded")
+              + (", eta tail at Re %g: " % RE_MAX
+                 + ", ".join(f"ord{o} {trunc[o]:.1%}" for o in sorted(trunc))
+                 if trunc else ", no eta truncation recorded"))
+        make_figures(arr, fom_rows, out, tag, rho_conv, trunc, plt, matplotlib)
 
 
 if __name__ == "__main__":

@@ -21,9 +21,11 @@ using MORFE
 using MORFE.Polynomials: evaluate   # rom_analysis.jl evaluates R at a point
 using Ferrite, FerriteGmsh
 using LinearAlgebra, SparseArrays, DelimitedFiles
+using SHA: sha256
 using Serialization: serialize   # observables.jl writes the VTK/lift bundles
 using KLU
-using ..Common: AbstractAssembledModel, Common
+using ..Common: AbstractAssembledModel, Common, write_paraview_p2p1,
+	write_paraview_p2p1_phase_animation
 import ..Common: build_model, summary_entries
 
 # Include order mirrors the Kármán driver (steady state feeds the linearisation).
@@ -40,16 +42,21 @@ include("eigensolver.jl")
 include("types.jl")
 include("fluid_model.jl")
 include("build_model.jl")
+include("parametric_fluid.jl")
 include("observables.jl")
 
 # Post-processing of a finished ROM: slaving, limit-cycle continuation, the
 # promotion-invariant physical quantities, and the convergence diagnostics. Kept out of
 # the example because three copies of the slaving algorithm had drifted apart there.
 include("rom_analysis.jl")
+# Summing those series past their radius of convergence. Included AFTER rom_analysis.jl —
+# `amplitude_series` reads R through its `_exps`/`_coefk` accessors.
+include("resummation.jl")
 # Full-order time integration and periodic orbits — the DNS reference.
 include("fom_orbit.jl")
 
 export setup_fem, U_MEAN, U_MAX
+export AbstractFlowBoundaryConditions, PoiseuilleChannelBC, UniformFreestreamBC
 export solve_steady_state, assemble_steady_nse!, compute_drag_lift
 export assemble_linear_operators, check_linearisation, compute_pressure_lift_weights
 export FluidConvection, make_param_coupling, make_base_forcing, assemble_K_visc
@@ -62,16 +69,24 @@ export solve_hopf_eigenproblem, AbstractModeNormalisation,
 # See the warning in its docstring: never call it for both halves of a conjugate pair.
 export left_eigenvector
 export AssembledFluidModel, fluid_model, build_model
+export AssembledParametricFluidModel, parametric_model
+export compute_transformed_drag_lift
 export lift_functional, lift_polynomial
 export export_reduced_dynamics, export_lift_polynomial, export_lift_csv, export_vtk_bundle
+export write_paraview_p2p1, write_paraview_p2p1_phase_animation
 
 # ROM post-processing (rom_analysis.jl)
 export ROMPoly, load_rom_poly, slaved_R1, truncate_dynamics
+export promoted_equilibrium, promoted_amplitude
 export rom_po_residual, rom_po_frequency, rom_hopf_eta,
-	rom_palc_tangent, rom_palc_step, trace_limit_cycle_branch,
+	rom_palc_tangent, rom_palc_step, trace_limit_cycle_branch, branch_amplitude_scale,
 	roots_at_re, sweep_branch_in_re
 export rom_invariants, read_invariants, write_invariants
-export homological_denominators, manifold_ratio_test, modal_growth
+export homological_denominators, manifold_ratio_test, modal_growth, domb_sykes,
+	eta_series_report, backbone_direction, fold_overlap
+
+# Resummation (resummation.jl) — summing the DPIM series past its radius of convergence
+export pade, resum, amplitude_series, tke_series, branch_by_amplitude
 
 # Full-order periodic orbits (fom_orbit.jl)
 export eval_perturbation_convection!, build_imex_operators, integrate_orbit!,

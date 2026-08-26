@@ -127,18 +127,65 @@ block-coupled solve across harmonics.
 function _harmonic_R1(R, ρ::Float64, η::Float64, Ω::Float64)
 	nv = _nvar(R)
 	npro = nv - 3
-	ex = _exps(R)
-
-	bs = Dict{Int, Vector{ComplexF64}}()          # drive of promoted rows, per harmonic
-	A0 = zeros(ComplexF64, max(npro, 1), max(npro, 1))
 	r1_core = zero(ComplexF64)                    # y-free monomials of R₁ at harmonic 1
 	r1_y = Dict{Int, Vector{ComplexF64}}()        # core harmonic → coefficient on each y_j
 
-	for (m, e) in enumerate(ex)
+	for (m, e) in enumerate(_exps(R))
 		a, b, c = e[1], e[2], e[nv]
 		s = a - b
 		v = ρ^(a + b) * (c == 0 ? 1.0 : η^c)
 		j = 0                                     # which promoted coordinate, 0 = none
+		for t in 3:(nv - 1)
+			e[t] != 0 && (j = t - 2; break)
+		end
+		c1 = _coefk(R, 1, m)
+		iszero(c1) && continue
+		if j == 0
+			s == 1 && (r1_core += c1 * v)
+		else
+			d = get!(() -> zeros(ComplexF64, npro), r1_y, s)
+			d[j] += c1 * v
+		end
+	end
+	npro == 0 && return r1_core
+
+	ys = _promoted_ys(R, ρ, η, Ω)
+	# A term `c · z₁^a z̄₁^b η^c · y_j` lands at harmonic (a−b) + s_j, so the fundamental
+	# picks up y_j at harmonic 1 − (a−b).
+	r1 = r1_core
+	for (s_core, cvec) in r1_y
+		yv = get(ys, 1 - s_core, nothing)
+		yv === nothing && continue
+		for j in 1:npro
+			r1 += cvec[j] * yv[j]
+		end
+	end
+	return r1
+end
+
+"""
+	_promoted_ys(R, ρ, η, Ω) → Dict{Int, Vector{ComplexF64}}
+
+Response of the promoted coordinates on the orbit, per harmonic: `y_s` solving
+`(isΩ·I − A₀) y_s = b_s`, with `b_s` the drive of the promoted rows at harmonic `s` and `A₀`
+the `s = 0` part of `∂R_k/∂y_j`.
+
+Split out of `_harmonic_R1` so the branch, the base-flow shift and the activity check all
+read the SAME closure. Three copies of the slaving algorithm drifting apart is what moved
+this into `src` in the first place; a fourth would undo that.
+"""
+function _promoted_ys(R, ρ::Float64, η::Float64, Ω::Float64)
+	nv = _nvar(R)
+	npro = nv - 3
+	ys = Dict{Int, Vector{ComplexF64}}()
+	npro == 0 && return ys
+	bs = Dict{Int, Vector{ComplexF64}}()          # drive of promoted rows, per harmonic
+	A0 = zeros(ComplexF64, npro, npro)
+	for (m, e) in enumerate(_exps(R))
+		a, b, c = e[1], e[2], e[nv]
+		s = a - b
+		v = ρ^(a + b) * (c == 0 ? 1.0 : η^c)
+		j = 0
 		for t in 3:(nv - 1)
 			e[t] != 0 && (j = t - 2; break)
 		end
@@ -152,32 +199,51 @@ function _harmonic_R1(R, ρ::Float64, η::Float64, Ω::Float64)
 				A0[k, j] += ck * v
 			end
 		end
-		c1 = _coefk(R, 1, m)
-		iszero(c1) && continue
-		if j == 0
-			s == 1 && (r1_core += c1 * v)
-		else
-			d = get!(() -> zeros(ComplexF64, npro), r1_y, s)
-			d[j] += c1 * v
-		end
 	end
-	npro == 0 && return r1_core
-
-	ys = Dict{Int, Vector{ComplexF64}}()
 	for (s, bvec) in bs
 		ys[s] = ((im * s * Ω) * I - A0) \ bvec
 	end
-	# A term `c · z₁^a z̄₁^b η^c · y_j` lands at harmonic (a−b) + s_j, so the fundamental
-	# picks up y_j at harmonic 1 − (a−b).
-	r1 = r1_core
-	for (s_core, cvec) in r1_y
-		yv = get(ys, 1 - s_core, nothing)
-		yv === nothing && continue
-		for j in 1:npro
-			r1 += cvec[j] * yv[j]
-		end
-	end
-	return r1
+	return ys
+end
+
+"""
+	promoted_equilibrium(R, η) → Vector{ComplexF64}
+
+Equilibrium of the promoted coordinates on the trivial (`z₁ = 0`) branch: `y*(η)` solving
+`R_k(0, 0, y, η) = 0`, which on that slice is the linear system `A₀ y = −b₀`.
+
+**`y*` is not zero, and requiring it to be is what broke two redesigns.** Once φ_k is a
+master direction, the base flow at Re ≠ Re₀ has a component along it, and `y*(η)` is exactly
+that component expressed in the new coordinate — the base-flow shift, not an error. The
+`s = 0` harmonic of `_promoted_ys` already solves for it, so the branch and the observables
+are taken about `y*(η)` and always were.
+
+What is worth checking is its SIZE. A shift comparable to the orbit amplitude means the
+promoted coordinate has stopped representing the base flow, and in practice means the
+pure-η forcing has diverged — which `eta_series_report` measures directly.
+"""
+function promoted_equilibrium(R, η::Float64)
+	npro = _nvar(R) - 3
+	npro == 0 && return ComplexF64[]
+	return get(_promoted_ys(R, 0.0, η, 0.0), 0, zeros(ComplexF64, npro))
+end
+
+"""
+	promoted_amplitude(R, ρ, η) → Float64
+
+Largest promoted-coordinate response on the orbit at `(ρ, η)`, `max_s max_k |y_{k,s}|`.
+
+The activity check. A promoted run whose branch has this at 0 is a change of coordinates
+that changed nothing: `{y = 0}` is invariant, `R₁` never sees a y-monomial, and the ROM is
+the un-promoted one in disguise. That is exactly what a normal-form tolerance tight enough
+to keep η out of `R_k` produces, and it went unnoticed for two runs because every physical
+quantity agreed — of course it did, it was the same ROM.
+"""
+function promoted_amplitude(R, ρ::Float64, η::Float64)
+	_nvar(R) == 3 && return 0.0
+	(_, Ω, _) = rom_po_R1(R, ρ, η)
+	ys = _promoted_ys(R, ρ, η, Ω)
+	return isempty(ys) ? 0.0 : maximum(maximum(abs, y) for y in values(ys))
 end
 
 """
@@ -285,6 +351,53 @@ function rom_palc_step(ρ::Float64, η::Float64, τ::Vector{Float64}, Δs::Float
 	Ω = rom_po_frequency(ρ_p, η_p, R)
 	τ_new = rom_palc_tangent(ρ_p, η_p, R, τ)
 	return ρ_p, η_p, 2π / abs(Ω), τ_new, n_iter, converged
+end
+
+"""
+	branch_amplitude_scale(R, η; lo, hi, n) → Float64
+
+Characteristic limit-cycle amplitude at parameter `η`, found without assuming one.
+
+**ρ has no natural size.** It is a master coordinate, so its scale is whatever the
+eigenvector gauge gives it: under `SymmetricBiorthogonal` the Kármán orbit happens to sit at
+ρ ~ O(1), under `LeftBiorthogonal` the SAME physical orbit sits some 400× further out,
+because that gauge leaves φ at its natural length instead of dividing by √α. Anything
+carrying units of ρ — a continuation step, a finite-difference increment, an initial guess —
+is therefore meaningless as a bare number, and hardcoding one silently pins the code to a
+gauge. That is not hypothetical: continuation constants tuned for ρ ~ O(1) traced 5001 steps
+to ρ = 0.002 in the left gauge and reported it as a collapsed branch.
+
+The fix is to measure the scale first and work in `ρ/ρ_ref`. Bracketing the first sign change
+of `G(ρ) = Re(R₁)/ρ` on a LOG grid spanning `lo`…`hi` is scale-free by construction: below
+the orbit `G ≈ σ > 0`, above it the saturating term wins. Returns `NaN` if no sign change is
+bracketed, and callers should fall back to 1.0 rather than propagate it.
+"""
+function branch_amplitude_scale(R, η::Float64; lo::Float64 = 1e-8, hi::Float64 = 1e8,
+		n::Int = 321)
+	g(ρ) = (v = try rom_po_residual(ρ, η, R) / ρ catch; NaN end;
+		isfinite(v) ? v : NaN)
+	prev_ρ, prev_g = NaN, NaN
+	for ρ in exp10.(range(log10(lo), log10(hi); length = n))
+		v = g(ρ)
+		if isnan(v)
+			prev_ρ, prev_g = NaN, NaN
+			continue
+		end
+		if !isnan(prev_g) && sign(v) != sign(prev_g)
+			# Bisect in log ρ — the bracket spans decades, so the geometric midpoint is the
+			# one that halves the remaining interval.
+			a, b, ga = prev_ρ, ρ, prev_g
+			for _ in 1:60
+				m = sqrt(a * b)
+				gm = g(m)
+				isnan(gm) && break
+				sign(gm) == sign(ga) ? (a = m) : (b = m)
+			end
+			return sqrt(a * b)
+		end
+		prev_ρ, prev_g = ρ, v
+	end
+	return NaN
 end
 
 """
@@ -664,11 +777,321 @@ function manifold_ratio_test(W)
 	# Reporting them anyway gave ρ_conv = 0.67 for a 6-mode run whose branch is accurate
 	# against DNS out to ρ ≈ 2.1 — an artefact, not a radius. Returning NaN makes callers
 	# (and figures.py) fall back to marking nothing rather than mark it wrongly.
+	# ρ_conv is suppressed for a promoted run: the mean-flow content moves out of the pure
+	# backbone z₁^{n+1}z̄₁^n into the mixed monomials z₁^a z̄₁^b y_k, so those norms are a
+	# RESIDUAL rather than a radius.
+	#
+	# η_conv is NOT suppressed. The pure-η column of W is the same object however many
+	# coordinates were promoted, so it is directly comparable across runs — and it is the
+	# number that exposed the tolerance bug (1.88e-2 un-promoted against 2.56e-4 promoted,
+	# now back to ≈2.1e-2 once the normal-form tolerance stopped dumping the η-expansion
+	# into R_k).
 	promoted = nv > 3
 	ρc = (promoted || isempty(amp)) ? NaN : last(amp).rho_conv
-	ηc = (promoted || isempty(eta)) ? NaN : last(eta).eta_conv
+	ηc = isempty(eta) ? NaN : last(eta).eta_conv
 	return (; amplitude = amp, eta = eta, rho_conv = ρc, eta_conv = ηc,
 		valid = !promoted)
+end
+
+"""
+	eta_series_report(R; re0, re_max, orders, gate_radius) → NamedTuple
+
+Convergence of the PARAMETER expansion, read off `R` directly. Run this before believing any
+plot.
+
+`manifold_ratio_test` measures `W`, which is coordinate-dependent and therefore not comparable
+between a promoted and an un-promoted run. `R`'s coefficient FAMILIES are comparable: for every
+run of the same problem, `R₁`'s `z₁η^c` is the eigenvalue series and `z₁²z̄₁η^c` is the Landau
+series, whatever else was promoted. Two numbers per family:
+
+  · **radius** — the ratio test `|a_c| / |a_{c+1}|`, taken at the largest `c` where both are
+    nonzero, i.e. where the sequence has settled.
+  · **truncation ratio** — `|a_c η^c| / |a_0|` at `η(re_max)` with `c` the highest η power the
+    order-N truncation retains. This is how much the LAST kept term still contributes at the top
+    of the sweep, and it is the honest statement of where the Re range stops being trustworthy.
+    It is not a promoted-run concern: un-promoted, `η(70) = 6.1e-3` against a radius of 1.05e-2
+    is 58% of the way out, so the tail is not negligible there either.
+
+This table is what distinguishes the three ways promotion has failed here, and it costs a
+deserialise and a dictionary lookup:
+
+  · **inert** — promoted rows carry no forcing at all, `R₁` identical to the un-promoted run.
+  · **divergent** — the promoted rows' pure-η forcing has its own radius (1.5e-4 measured), far
+    inside the Hopf block's, and it drags `R₁` down with it.
+  · **contaminated** — radii look normal but a low-degree coefficient is wrong by orders of
+    magnitude and every higher one inherits the offset, which is why `families[2].coeffs[1]`
+    (the η-independent Landau coefficient) is reported separately: it is the one entry that must
+    agree with the un-promoted run to full precision, and it did even in the run whose `R₁`
+    reached 1e36.
+"""
+function eta_series_report(R; re0::Float64 = 49.03, re_max::Float64 = 70.0,
+		orders = (3, 5, 7, 9), gate_radius::Float64 = 5e-3,
+		gate_truncation::Float64 = 1.0)
+	ex = _exps(R)
+	nv = _nvar(R)
+	npro = nv - 3
+	idx = Dict{Vector{Int}, Int}()
+	for (m, e) in enumerate(ex)
+		idx[collect(Int, e)] = m
+	end
+	c_top = maximum(Int(e[nv]) for e in ex)
+	η_max = 1 / re_max - 1 / re0
+
+	function coeffs(row::Int, a::Int, b::Int)
+		v = zeros(Float64, c_top + 1)
+		for c in 0:c_top
+			k = zeros(Int, nv)
+			k[1] = a
+			k[2] = b
+			k[nv] = c
+			m = get(idx, k, 0)
+			m == 0 || (v[c + 1] = abs(_coefk(R, row, m)))
+		end
+		return v
+	end
+	# Last ratio with both terms nonzero. Early ratios have not settled, and a family that is
+	# zero above some power (a promoted row with no η forcing) must report NaN, not a radius.
+	function radius(v)
+		r = NaN
+		for i in 1:(length(v) - 1)
+			(v[i] > 0 && v[i + 1] > 0) && (r = v[i] / v[i + 1])
+		end
+		return r
+	end
+	# `d0` is the family's degree in (z₁, z̄₁), so `truncate_dynamics(R, N)` keeps η powers up
+	# to N − d0 — the CORE degree, matching how the branch is traced.
+	function truncation(v, d0::Int)
+		out = NamedTuple[]
+		for N in orders
+			c = N - d0
+			(c < 1 || c + 1 > length(v) || v[1] <= 0) && continue
+			push!(out, (; order = N, eta_power = c,
+				ratio = v[c + 1] * abs(η_max)^c / v[1]))
+		end
+		return out
+	end
+
+	fams = NamedTuple[]
+	for (name, row, a, b) in (("R1  z1*eta^c", 1, 1, 0), ("R1  z1^2 z1b*eta^c", 1, 2, 1))
+		v = coeffs(row, a, b)
+		push!(fams, (; name, row, core_degree = a + b, coeffs = v,
+			radius = radius(v), truncation = truncation(v, a + b)))
+	end
+	for k in 1:npro
+		v = coeffs(2 + k, 0, 0)
+		push!(fams, (; name = "R$(2 + k)  eta^c (pure-parameter forcing)", row = 2 + k,
+			core_degree = 0, coeffs = v, radius = radius(v),
+			truncation = truncation(v, 0)))
+	end
+
+	lines = String[@sprintf("eta-series report   nvar=%d   eta(Re=%.1f) = %.4e",
+		nv, re_max, η_max)]
+	for f in fams
+		push!(lines, @sprintf("  %-34s radius %.3e", f.name, f.radius))
+		push!(lines, "      c:     " * join([@sprintf("%10.3e", x) for x in f.coeffs], ""))
+		isempty(f.truncation) ||
+			push!(lines, "      trunc: " * join([@sprintf("ord%d(eta^%d) %.2e  ",
+					t.order, t.eta_power, t.ratio) for t in f.truncation], ""))
+	end
+	# The gate is on R₁ alone. A promoted row may legitimately carry a shorter η series — what
+	# must not happen is that shortness propagating into the oscillator's own coefficients.
+	#
+	# BOTH tests are needed and neither subsumes the other. The radius is blind to a level
+	# shift: the run whose Landau series went 1.32e-1, 3.40e5, 3.88e16 reports a perfectly
+	# healthy radius of 1.24e-2, because from c = 2 on the ratios are normal and only the
+	# offset is wrong. The truncation ratio catches that instantly (1.1e13 at order 5). Equally,
+	# a run can have every term small at η(re_max) and still be diverging in a way the radius
+	# exposes. Fail on either.
+	r1 = [f for f in fams if f.row == 1]
+	# `init = -Inf`, not NaN: `max(NaN, x)` is NaN in Julia, so a NaN seed poisons the whole
+	# fold and every run reports NaN. Empty (no order reaches this family) then reads as -Inf
+	# and is mapped back to NaN below.
+	worst = maximum(Float64[t.ratio for f in r1 for t in f.truncation]; init = -Inf)
+	isfinite(worst) || (worst = NaN)
+	# A family needs two nonzero coefficients before a ratio means anything. At order 3 the
+	# Landau family has only c = 0, so its radius is NaN — that is "not measurable at this
+	# order", not "diverging", and failing on it made the FAST profile unable to pass its own
+	# gate. Judge on the families that HAVE a radius, and require at least one.
+	measurable = [f for f in r1 if !isnan(f.radius)]
+	ok = !isempty(measurable) && all(f -> f.radius >= gate_radius, measurable) &&
+		 !isnan(worst) && worst <= gate_truncation
+	push!(lines, @sprintf("  gate: R1 radius >= %.1e AND max trunc <= %.1f ? %s%s",
+		gate_radius, gate_truncation, ok ? "PASS" : "FAIL",
+		length(measurable) == length(r1) ? "" :
+		@sprintf("   (%d/%d families measurable at this order)",
+			length(measurable), length(r1))))
+	push!(lines, @sprintf("        max trunc = %.3e   landau(c=0) = %.8e",
+		worst, fams[2].coeffs[1]))
+	return (; families = fams, eta_max = η_max, pass = ok, max_truncation = worst,
+		landau_c0 = fams[2].coeffs[1], lines = lines)
+end
+
+"""
+	domb_sykes(W) → NamedTuple
+
+Locate and classify the singularity that limits the amplitude expansion.
+
+For a series `Σ aₙ ρⁿ` whose nearest singularity is at `ρ_c` and behaves like
+`(1 − ρ/ρ_c)^{-γ}`, the coefficient ratios obey asymptotically
+
+	rₙ = aₙ / aₙ₋₁ ≈ (1/ρ_c) · (1 + (γ − 1)/n)
+
+so plotting `rₙ` against `1/n` gives a straight line whose **intercept is 1/ρ_c** and whose
+**slope is (γ − 1)/ρ_c**. That separates the two cases that matter here:
+
+  · `γ = 1` (slope ≈ 0) — a simple **POLE**. This is what "the radius is set by the nearest
+    pole, which signals an outer mode" predicts, and it is the case where carrying that mode
+    as a coordinate should push the singularity out.
+  · `γ ∉ ℤ` (slope ≠ 0) — a **branch point**, which is what a quadratic convolution generically
+    produces and which no single mode is responsible for.
+
+Only the backbone `z₁^{n+1}z̄₁^n` is used, so this is the ρ direction. Five degrees (1…9) is few
+for an extrapolation — the fit residual is returned so the reader can judge, and a two-point
+Richardson estimate is given alongside the least-squares one.
+"""
+function domb_sykes(W)
+	exps = W.poly.multiindex_set.exponents
+	C = W.poly.coefficients
+	norms = Float64[]
+	degs = Int[]
+	for n in 0:4
+		m = findfirst(e -> e[1] == n + 1 && e[2] == n && sum(e) == 2n + 1, exps)
+		m === nothing && continue
+		push!(norms, sqrt(sum(abs2, @view C[:, 1, m])))
+		push!(degs, 2n + 1)
+	end
+	length(norms) < 3 && return (; rho_c = NaN, gamma = NaN, resid = NaN,
+		x = Float64[], r = Float64[])
+	# Successive backbone degrees differ by 2, so the ratio per unit degree is √(aₙ/aₙ₋₁).
+	r = [sqrt(norms[i] / norms[i - 1]) for i in 2:length(norms)]
+	x = [1.0 / degs[i] for i in 2:length(degs)]
+	# least squares r = A + B x
+	n = length(r)
+	x̄ = sum(x) / n
+	r̄ = sum(r) / n
+	Sxx = sum((xi - x̄)^2 for xi in x)
+	B = Sxx > 0 ? sum((x[i] - x̄) * (r[i] - r̄) for i in 1:n) / Sxx : 0.0
+	A = r̄ - B * x̄
+	resid = sqrt(sum((r[i] - (A + B * x[i]))^2 for i in 1:n) / n)
+	ρc = A > 0 ? 1 / A : NaN
+	γ = A > 0 ? 1 + B * ρc : NaN
+	return (; rho_c = ρc, gamma = γ, resid = resid, x = x, r = r,
+		degrees = degs, norms = norms)
+end
+
+"""
+	backbone_direction(W) → NamedTuple
+
+Does the manifold's high-degree content settle onto ONE direction? Needs only `W` — no
+eigenbasis, no `B₁`, no solve.
+
+If the series `Σ Wₙ ρⁿ` is limited by a single singularity, its coefficient VECTORS align
+with that singularity's direction as `n → ∞`, so `cos(Wₙ, W_top) → 1`. Promotion works by
+making that direction a coordinate, and it can only work if the direction exists: a
+`cos` that stalls well below 1 means the high-degree content is spread over several
+directions and no single promoted mode captures it.
+
+This is the measurement `modal_growth` cannot make. Ranking modes by their amplitude at the
+top degree answers "which mode is largest there", which is not the same question and gave a
+misleading answer here — it picked λ = −5.135420 on a degree-9 amplitude of 3.50e-8 against
+2.23e-8 and 1.32e-8 for its neighbours, i.e. no dominance at all, and that mode's pairing
+`α/α_Hopf = 8.41e-3` makes it a poor coordinate for unrelated reasons.
+
+Measured on the un-promoted order-9 run, `cos(Wₙ, W_top)` climbs monotonically — 0.27, 0.46,
+0.72, 0.87 along `z₁^{n+1}z̄₁^n` and 0.48, 0.78, 0.92 along the mean-flow `z₁^n z̄₁^n`. The
+direction is settling, and the mean-flow family settles faster, which is consistent with the
+fold at ρ_c ≈ 1.81 being a mean-flow-distortion effect. Five backbone terms is few, so read
+the trend, not the last digit.
+"""
+function backbone_direction(W)
+	exps = W.poly.multiindex_set.exponents
+	C = W.poly.coefficients
+	col(m) = @view C[:, 1, m]
+	function cosang(a, b)
+		na = sqrt(sum(abs2, a))
+		nb = sqrt(sum(abs2, b))
+		return (na == 0 || nb == 0) ? NaN : abs(dot(a, b)) / (na * nb)
+	end
+	function family(pick)
+		ms = Int[]
+		for n in 0:4
+			m = findfirst(e -> pick(e, n), exps)
+			m === nothing || push!(ms, m)
+		end
+		rows = NamedTuple[]
+		for i in eachindex(ms)
+			push!(rows, (; deg = sum(Int, exps[ms[i]]),
+				norm = sqrt(sum(abs2, col(ms[i]))),
+				cos_next = i < length(ms) ? cosang(col(ms[i]), col(ms[i + 1])) : NaN,
+				cos_top = i < length(ms) ? cosang(col(ms[i]), col(ms[end])) : NaN))
+		end
+		return rows
+	end
+	amp = family((e, n) -> e[1] == n + 1 && e[2] == n && sum(e) == 2n + 1)
+	mean = family((e, n) -> n >= 1 && e[1] == n && e[2] == n && sum(e) == 2n)
+	# "Settling" = the alignment with the top degree is still climbing at the last step we
+	# can measure. It is a trend statement, not a converged limit; with five terms it cannot
+	# be anything more.
+	#
+	# `nothing` when no family has three degrees to compare — the FAST profile stops at
+	# order 3 and has two. Reporting `false` there reads as "the direction has stalled",
+	# which is a claim the data cannot support either way.
+	trend(f) = length(f) < 3 || isnan(f[end - 1].cos_top) ? nothing :
+			   f[end - 1].cos_top > f[max(end - 2, 1)].cos_top
+	ta, tm = trend(amp), trend(mean)
+	return (; amplitude = amp, mean_flow = mean,
+		settling = (ta === nothing && tm === nothing) ? nothing :
+				   (ta === true || tm === true))
+end
+
+"""
+	fold_overlap(W, Φ, λ; master) → NamedTuple
+
+WHICH outer modes span the direction the manifold is straining in. Use this to choose what to
+promote.
+
+`backbone_direction` establishes THAT the high-degree content settles onto a single
+direction; this decomposes that direction, as the cosine
+`|⟨φ_k, W_d⟩| / (‖φ_k‖ ‖W_d‖)` over the top backbone degrees `d`.
+
+**Right eigenvectors only, and that is the point.** `modal_growth` projects with `ψ`, and in
+this descriptor pencil the modes carrying the fastest-growing manifold content are precisely
+the ones whose pairing `α = ψᵀB₁φ` is degenerate (~1e-13) — `left_eigenvector` warns on every
+one of them that its left and right vectors are not the same mode. Ranking on that measures
+the adjoint solve, not the manifold. No adjoint enters here, so those modes cannot corrupt
+the answer, and it costs nothing extra because `Φ` is already in hand.
+
+Measured on the un-promoted Kármán order-9 run, the degree-9 backbone is led by
+λ = −6.542148 + 18.415390i at 0.184 and −11.812255 + 19.322862i at 0.115, with **every real
+mode below 0.038** — including all three that had been promoted on `modal_growth`'s advice.
+Promoting a mode nearly orthogonal to this direction is a change of coordinates that changes
+nothing, which is exactly what was measured: ρ_conv 1.95 either way and the order-9 fold
+unmoved at Re 55.1.
+"""
+function fold_overlap(W, Φ::AbstractMatrix, λ::AbstractVector{<:Complex};
+		master::AbstractVector{Int} = Int[])
+	exps = W.poly.multiindex_set.exponents
+	C = W.poly.coefficients
+	cols = Tuple{Int, Int}[]
+	for n in 4:-1:0                      # highest backbone degree first
+		m = findfirst(e -> e[1] == n + 1 && e[2] == n && sum(e) == 2n + 1, exps)
+		m === nothing || push!(cols, (2n + 1, m))
+	end
+	isempty(cols) && return (; degrees = Int[], modes = NamedTuple[])
+	out = NamedTuple[]
+	for k in axes(Φ, 2)
+		k in master && continue
+		φ = @view Φ[:, k]
+		nφ = sqrt(sum(abs2, φ))
+		ov = [begin
+			w = @view C[:, 1, m]
+			nw = sqrt(sum(abs2, w))
+			(nφ > 0 && nw > 0) ? abs(dot(φ, w)) / (nφ * nw) : NaN
+		end for (_, m) in cols]
+		push!(out, (; mode = k, λ = λ[k], overlaps = ov, top = first(ov)))
+	end
+	sort!(out; by = r -> isnan(r.top) ? -Inf : -r.top)
+	return (; degrees = [d for (d, _) in cols], modes = out)
 end
 
 """
@@ -678,10 +1101,13 @@ Decompose the manifold's amplitude backbone into outer modes and rank them by ho
 each grows with degree. `ψ` holds the left eigenvectors of the outer modes (columns), so
 the modal amplitude of mode k at backbone degree d is `c_k = ψ_kᵀ B₁ W[:, m_d]`.
 
-This is the measurement `homological_denominators` cannot make: it reports which outer
-mode is ACTUALLY excited as the order grows, numerator included, rather than which one
-merely has the smallest denominator. The mode with the largest growth ratio is the one
-limiting the expansion.
+⚠ **Do not select promotion candidates with this — use `fold_overlap`.** The ranking needs
+`ψ`, and here the top eight rows are all modes whose pairing is degenerate at ~1e-13, where
+`left_eigenvector` warns that the left and right vectors are not the same mode. Acting on it
+sent three separate runs to real modes whose actual overlap with the fold direction is below
+0.038, and all three changed nothing. Kept because the growth ratio is still the honest
+answer to a different question — how fast a given mode's component grows with degree, given a
+trustworthy `ψ`.
 """
 function modal_growth(W, B₁, ψ::AbstractMatrix, λ_outer::AbstractVector{<:Complex})
 	exps = W.poly.multiindex_set.exponents

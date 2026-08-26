@@ -39,7 +39,7 @@ function _golden_setup()
     add!(ch, Dirichlet(:u, getfacetset(grid, "left"), (x, t) -> zeros(3), [1, 2, 3]))
     close!(ch); update!(ch, 0.0)
     free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
-    return (; dh, cv, free_to_local = Dict(d => i for (i, d) in enumerate(free)),
+    return (; dh, cv, free_to_local = PGg.free_dof_map(ndofs(dh), free),
         n_free = length(free))
 end
 

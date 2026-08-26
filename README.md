@@ -14,7 +14,7 @@ domains as first-class submodules.
 
 | Submodule | Provides |
 | --------- | -------- |
-| `StructuralSVK` | St. Venant-Kirchhoff "mesh → ROM" UI: `mechanical_model`, `parametrise`, `SVKMaterial`, `RayleighDamping`, `HarmonicForcing`, plus the Ferrite geometric-nonlinearity backend (`svk_nonlinearity`, `svk_assemble_KM!`) |
+| `StructuralSVK` | St. Venant-Kirchhoff model construction: `mechanical_model`, `build_model`, `SVKMaterial`, `RayleighDamping`, `HarmonicForcing`, plus the Ferrite geometric-nonlinearity backend (`svk_nonlinearity`, `svk_assemble_KM!`) |
 | `ParametricStructural` | General multi-parameter geometric ROMs: additive map `x(θ,x₀) = x₀ + Σᵢ θᵢψᵢ(x₀)` with per-parameter (multiindex-box) θ-series truncation |
 | `FluidNavierStokes` | Incompressible cylinder-flow DPIM: Taylor-Hood setup, Newton base flow, linearised operators, convection `FEMMultilinearMap` |
 | `Common` | COMSOL `.mphtxt` mesh reading (`load_comsol_grid`) and Paraview/VTK export (`write_paraview_*`, activated by `using WriteVTK`) |
@@ -40,8 +40,10 @@ beam = SVK.mechanical_model("beam.msh";
     damping   = SVK.RayleighDamping(α = 5.4e-3, β = 1.9e-2),
     dirichlet = "Dirichlet")
 
-rom = SVK.parametrise(beam; master = [1], order = 7)
-SVK.print_equations(rom)
+(; model, spectral, meta) = build_model(beam;
+    master = [1], expansion_order = 7)
+W, R = parametrise(model, spectral, 7;
+    resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
 ```
 
 ## Examples
@@ -52,7 +54,7 @@ bootstraps its own environment (clone MORFE.jl next to this repository, or set
 
 | Folder | Model |
 | ------ | ----- |
-| [`01_clamped_beam_ferrite/`](examples/01_clamped_beam_ferrite/) | Clamped-clamped SVK beam — high-level UI and the fully explicit low-level pipeline |
+| [`01_clamped_beam_ferrite/`](examples/01_clamped_beam_ferrite/) | Clamped-clamped SVK beam — minimal notebook using the common MORFE API |
 | [`03_arch_comsol_wedge/`](examples/03_arch_comsol_wedge/) | Polysilicon arch, COMSOL P18 wedge mesh |
 | [`04_parametric_clamped_beam/`](examples/04_parametric_clamped_beam/) | Two-parameter ROM (axial stretch + bending-mode arch) |
 | [`05_karman_vortex_street/`](examples/05_karman_vortex_street/) | Kármán vortex street — Hopf bifurcation to a Stuart-Landau ROM |
@@ -62,14 +64,17 @@ bootstraps its own environment (clone MORFE.jl next to this repository, or set
 ## Tests
 
 ```julia
-using Pkg; Pkg.test("MORFEFerrite")   # small in-memory SVK equivalence gates
+using Pkg; Pkg.test("MORFEFerrite")
 ```
 
-Full-mesh equivalence gates (high-level ≡ low-level ROM) run via the example
-environment:
+Example 01 validates both its committed order-3 output and an order-9 run
+against the conservative order-9 reference:
 
 ```bash
-julia --project=examples/01_clamped_beam_ferrite test/StructuralSVK/run_gates.jl
+MORFE_ORDER=9 jupyter nbconvert --execute --to notebook --inplace \
+  examples/01_clamped_beam_ferrite/clamped_beam.ipynb
+julia --project=examples/01_clamped_beam_ferrite \
+  examples/01_clamped_beam_ferrite/validate.jl
 ```
 
 ## License

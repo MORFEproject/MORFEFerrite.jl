@@ -5,17 +5,15 @@ Returns a NamedTuple with:
   grid, dh, ch_full, ch_hom, cv_vel, cv_pres,
   free, free_to_local, n_free, dof_range_u, dof_range_p, n_vel_dofs_per_cell
 
-Two ConstraintHandlers over the SAME prescribed-DOF set (different inlet values):
-  ch_full  — inhomogeneous Poiseuille inlet + no-slip walls + cylinder;
-			 used for the steady-state Newton solve
-  ch_hom   — homogeneous inlet + no-slip walls + cylinder;
-			 used for the linearised (perturbation / DPIM) problem.
-			 The inlet perturbation is frozen to zero (u = u₀ imposed → u' = 0),
-			 matching the base-flow BC set and the reference DPIM2D_NS code.
+Two ConstraintHandlers use the same prescribed-DOF set:
+  ch_full  — values from the selected base-flow boundary policy;
+             used for the steady-state Newton solve
+  ch_hom   — zero perturbations on every prescribed base-flow boundary;
+             used for the linearised (perturbation / DPIM) problem.
 
 Consequently 'free' == 'free_dpim' as index sets:
-  free = setdiff(all, ch_full) — excludes inlet + walls + cylinder
-  free_dpim = setdiff(all, ch_hom)  — excludes inlet + walls + cylinder
+  free = setdiff(all, ch_full)
+  free_dpim = setdiff(all, ch_hom)
 """
 
 using Ferrite
@@ -35,14 +33,150 @@ const _CHANNEL_H = 0.41
 const _CYL_R = 0.05
 const _CYL_D = 2.0 * _CYL_R
 
-"""
-	setup_fem(meshfile) -> NamedTuple
+"""Base type for velocity boundary-condition policies accepted by [`setup_fem`](@ref)."""
+abstract type AbstractFlowBoundaryConditions end
 
-Load the mesh at `meshfile` and build all Ferrite FEM objects for the
-P2/P1 Taylor-Hood cylinder-flow problem.
 """
-function setup_fem(meshfile::String)
-	grid = togrid(meshfile)
+    PoiseuilleChannelBC(; mean_velocity=1.0, channel_height=0.41,
+                         inlet_tag="Inlet", wall_tag="Walls")
+
+Legacy Turek--Schäfer channel conditions: parabolic inlet and no-slip horizontal
+walls. This remains the implicit `setup_fem` default so existing examples are
+bit-for-bit compatible at the constraint level.
+"""
+struct PoiseuilleChannelBC <: AbstractFlowBoundaryConditions
+	mean_velocity::Float64
+	channel_height::Float64
+	inlet_tag::String
+	wall_tag::String
+	function PoiseuilleChannelBC(mean_velocity::Real, channel_height::Real,
+		inlet_tag::AbstractString, wall_tag::AbstractString)
+		mean_velocity > 0 || throw(ArgumentError("mean_velocity must be positive"))
+		channel_height > 0 || throw(ArgumentError("channel_height must be positive"))
+		new(Float64(mean_velocity), Float64(channel_height),
+			String(inlet_tag), String(wall_tag))
+	end
+end
+PoiseuilleChannelBC(; mean_velocity::Real=U_MEAN,
+	channel_height::Real=_CHANNEL_H, inlet_tag::AbstractString="Inlet",
+	wall_tag::AbstractString="Walls") =
+	PoiseuilleChannelBC(mean_velocity, channel_height, inlet_tag, wall_tag)
+
+"""
+    UniformFreestreamBC((1.0, 0.0); inlet_tag="Inlet", farfield_tag="Farfield")
+
+External-flow conditions with a fixed, spatially uniform velocity on the inlet
+and the top/bottom far-field boundary. The outlet is intentionally absent from
+this policy and therefore retains the natural traction condition of the weak
+form.
+"""
+struct UniformFreestreamBC <: AbstractFlowBoundaryConditions
+	velocity::NTuple{2,Float64}
+	inlet_tag::String
+	farfield_tag::String
+	function UniformFreestreamBC(velocity,
+		inlet_tag::AbstractString, farfield_tag::AbstractString)
+		length(velocity) == 2 || throw(ArgumentError(
+			"freestream velocity must have exactly two components"))
+		v = (Float64(velocity[1]), Float64(velocity[2]))
+		all(isfinite, v) || throw(ArgumentError("freestream velocity must be finite"))
+		hypot(v...) > 0 || throw(ArgumentError("freestream velocity must be nonzero"))
+		new(v, String(inlet_tag), String(farfield_tag))
+	end
+end
+UniformFreestreamBC(velocity=(1.0, 0.0);
+	inlet_tag::AbstractString="Inlet", farfield_tag::AbstractString="Farfield") =
+	UniformFreestreamBC(velocity, inlet_tag, farfield_tag)
+
+function _domain_bounds(grid::Ferrite.Grid{2})
+	xs = (node.x[1] for node in grid.nodes)
+	ys = (node.x[2] for node in grid.nodes)
+	xmin, xmax = extrema(xs)
+	ymin, ymax = extrema(ys)
+	return (xmin=Float64(xmin), xmax=Float64(xmax),
+		ymin=Float64(ymin), ymax=Float64(ymax))
+end
+
+_bc_signature(bc::PoiseuilleChannelBC) = join((
+	"PoiseuilleChannelBC", repr(bc.mean_velocity), repr(bc.channel_height),
+	bc.inlet_tag, bc.wall_tag), '|')
+_bc_signature(bc::UniformFreestreamBC) = join((
+	"UniformFreestreamBC", repr(bc.velocity[1]), repr(bc.velocity[2]),
+	bc.inlet_tag, bc.farfield_tag), '|')
+
+function _model_fingerprint(grid, bc, obstacle, reference_length, quadrature_order)
+	b = _domain_bounds(grid)
+	payload = join((_bc_signature(bc), obstacle,
+		repr(Float64(reference_length)), string(Int(quadrature_order)),
+		repr(b.xmin), repr(b.xmax), repr(b.ymin), repr(b.ymax)), '|')
+	return bytes2hex(sha256(Vector{UInt8}(codeunits(payload))))
+end
+
+function _add_full_velocity_constraints!(ch, grid, bc::PoiseuilleChannelBC,
+	obstacle)
+	H = bc.channel_height
+	Umax = 1.5 * bc.mean_velocity
+	add!(ch, Dirichlet(:u, getfacetset(grid, bc.inlet_tag),
+		(x, _) -> Vec{2}((Umax * 4.0 * x[2] * (H - x[2]) / H^2, 0.0))))
+	add!(ch, Dirichlet(:u, getfacetset(grid, bc.wall_tag),
+		(x, _) -> Vec{2}((0.0, 0.0))))
+	add!(ch, Dirichlet(:u, getfacetset(grid, obstacle),
+		(x, _) -> Vec{2}((0.0, 0.0))))
+end
+
+function _add_full_velocity_constraints!(ch, grid, bc::UniformFreestreamBC,
+	obstacle)
+	velocity = Vec{2}(bc.velocity)
+	add!(ch, Dirichlet(:u, getfacetset(grid, bc.inlet_tag),
+		(x, _) -> velocity))
+	add!(ch, Dirichlet(:u, getfacetset(grid, bc.farfield_tag),
+		(x, _) -> velocity))
+	add!(ch, Dirichlet(:u, getfacetset(grid, obstacle),
+		(x, _) -> Vec{2}((0.0, 0.0))))
+end
+
+function _add_homogeneous_velocity_constraints!(ch, grid,
+	bc::PoiseuilleChannelBC, obstacle)
+	for tag in (bc.inlet_tag, bc.wall_tag, obstacle)
+		add!(ch, Dirichlet(:u, getfacetset(grid, tag),
+			(x, _) -> Vec{2}((0.0, 0.0))))
+	end
+end
+
+function _add_homogeneous_velocity_constraints!(ch, grid,
+	bc::UniformFreestreamBC, obstacle)
+	for tag in (bc.inlet_tag, bc.farfield_tag, obstacle)
+		add!(ch, Dirichlet(:u, getfacetset(grid, tag),
+			(x, _) -> Vec{2}((0.0, 0.0))))
+	end
+end
+
+"""
+setup_fem(meshfile_or_grid; obstacle_tag = "Cylinder", reference_length = 0.1,
+          quadrature_order = 6, channel_height = 0.41,
+          boundary_conditions = nothing) -> NamedTuple
+
+Load `meshfile`, or use an already-loaded two-dimensional Ferrite grid, and
+build all FEM objects for the P2/P1 Taylor-Hood cylinder-flow problem. The grid
+overload permits topology-preserving geometry continuation without serialising
+one mesh file per parameter value.
+"""
+function setup_fem(meshfile::AbstractString; kwargs...)
+	return setup_fem(togrid(String(meshfile)); kwargs...)
+end
+
+function setup_fem(grid::Ferrite.Grid{2};
+	obstacle_tag::AbstractString = "Cylinder",
+	reference_length::Real = _CYL_D,
+	quadrature_order::Integer = 6,
+	channel_height::Real = _CHANNEL_H,
+	boundary_conditions::Union{Nothing,AbstractFlowBoundaryConditions}=nothing)
+	reference_length > 0 || throw(ArgumentError("reference_length must be positive"))
+	quadrature_order >= 1 || throw(ArgumentError("quadrature_order must be positive"))
+	channel_height > 0 || throw(ArgumentError("channel_height must be positive"))
+	obstacle = String(obstacle_tag)
+	bc = isnothing(boundary_conditions) ?
+		PoiseuilleChannelBC(; channel_height) : boundary_conditions
 	@info "Grid: $(getncells(grid)) cells, $(getnnodes(grid)) nodes"
 
 	# ── Interpolations ────────────────────────────────────────────────────
@@ -56,11 +190,10 @@ function setup_fem(meshfile::String)
 	ip_pres = Lagrange{RefTriangle, 1}()
 
 	# ── Quadrature ────────────────────────────────────────────────────────
-	# order=4: integrates polynomials of degree ≤ 4 exactly.
-	# This covers ∇P2·∇P2 (degree 2) and P2·P2 mass (degree 4).
-	# For the nonlinear convection P2·∇P2·P2 (degree 5), minor quadrature
-	# error is acceptable — the spatial truncation error dominates anyway.
-	qr = QuadratureRule{RefTriangle}(4)
+	# Order 6 is the parametric-profile production default: convection is degree
+	# five even before pullback factors are introduced. The keyword also permits
+	# the mandatory 4/6/8 quadrature convergence study.
+	qr = QuadratureRule{RefTriangle}(Int(quadrature_order))
 
 	# Sub-parametric CellValues: P2/P1 fields on linear-triangle geometry
 	cv_vel = CellValues(qr, ip_vel, ip_geo)
@@ -81,18 +214,9 @@ function setup_fem(meshfile::String)
 	@info "  Velocity per cell : $n_vel_dofs_per_cell  (range $dof_range_u)"
 	@info "  Pressure per cell : $n_pres_dofs_per_cell (range $dof_range_p)"
 
-	H = _CHANNEL_H
-
 	# ── Inhomogeneous BCs (for steady-state Newton solve) ─────────────────
 	ch_full = ConstraintHandler(dh)
-	# Inlet: Poiseuille profile [u_x(y), 0] as a Vec{2} (no components arg → all DOFs)
-	add!(ch_full, Dirichlet(:u, getfacetset(grid, "Inlet"),
-		(x, _) -> Vec{2}((U_MAX * 4.0 * x[2] * (H - x[2]) / H^2, 0.0))))
-	# No-slip walls and cylinder
-	add!(ch_full, Dirichlet(:u, getfacetset(grid, "Walls"),
-		(x, _) -> Vec{2}((0.0, 0.0))))
-	add!(ch_full, Dirichlet(:u, getfacetset(grid, "Cylinder"),
-		(x, _) -> Vec{2}((0.0, 0.0))))
+	_add_full_velocity_constraints!(ch_full, grid, bc, obstacle)
 	close!(ch_full)
 	update!(ch_full, 0.0)
 
@@ -102,12 +226,7 @@ function setup_fem(meshfile::String)
 	# there (u' = 0); leaving the inlet free would inject spurious inlet velocity
 	# into the modes and the convective quadratic. Matches the reference code.
 	ch_hom = ConstraintHandler(dh)
-	add!(ch_hom, Dirichlet(:u, getfacetset(grid, "Inlet"),
-		(x, _) -> Vec{2}((0.0, 0.0))))
-	add!(ch_hom, Dirichlet(:u, getfacetset(grid, "Walls"),
-		(x, _) -> Vec{2}((0.0, 0.0))))
-	add!(ch_hom, Dirichlet(:u, getfacetset(grid, "Cylinder"),
-		(x, _) -> Vec{2}((0.0, 0.0))))
+	_add_homogeneous_velocity_constraints!(ch_hom, grid, bc, obstacle)
 	close!(ch_hom)
 	update!(ch_hom, 0.0)
 
@@ -126,10 +245,17 @@ function setup_fem(meshfile::String)
 	@info "  Free DOFs (steady state) : $n_free"
 	@info "  Free DOFs (DPIM)         : $n_free_dpim  (inlet frozen)"
 
+	bounds = _domain_bounds(grid)
+	model_fingerprint = _model_fingerprint(grid, bc, obstacle,
+		reference_length, quadrature_order)
 	return (;
 		grid, dh, ch_full, ch_hom, cv_vel, cv_pres, ip_vel, ip_pres, qr,
 		free, free_to_local, n_free,
 		free_dpim, free_to_local_dpim, n_free_dpim,
 		dof_range_u, dof_range_p, n_vel_dofs_per_cell,
+		obstacle_tag = obstacle, reference_length = Float64(reference_length),
+		quadrature_order = Int(quadrature_order),
+		channel_height = Float64(channel_height), boundary_conditions=bc,
+		domain_bounds=bounds, model_fingerprint,
 	)
 end

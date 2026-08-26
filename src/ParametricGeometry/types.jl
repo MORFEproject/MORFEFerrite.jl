@@ -39,14 +39,23 @@ struct AssembledParametricModel{Nθ, PD, B} <: AbstractAssembledModel
 	maps::Vector{Any}                    # ParametricMap, one per nonlinear form
 	map_arities::Vector{Tuple}
 	n_geometry_parameters::Int
+	external_components::Vector{Int}
+	n_external_parameters::Int
 	info::NamedTuple
 end
 
 function AssembledParametricModel(pd::ParametricDiscretisation{Nθ}, base,
 	operators::Vector{ParametricOperator}, maps::Vector, map_arities::Vector;
+	external_components = collect(1:Nθ),
+	n_external_parameters::Integer = isempty(external_components) ? 0 : maximum(external_components),
 	info::NamedTuple = NamedTuple()) where {Nθ}
+	length(external_components) == Nθ || throw(ArgumentError(
+		"external_components must map all $Nθ geometry parameters"))
+	all(c -> 1 <= c <= n_external_parameters, external_components) || throw(ArgumentError(
+		"external component mapping is outside 1:$n_external_parameters"))
 	return AssembledParametricModel{Nθ, typeof(pd), typeof(base)}(
-		pd, base, operators, collect(Any, maps), collect(Tuple, map_arities), Nθ, info)
+		pd, base, operators, collect(Any, maps), collect(Tuple, map_arities), Nθ,
+		collect(Int, external_components), Int(n_external_parameters), info)
 end
 
 """

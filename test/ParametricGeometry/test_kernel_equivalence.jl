@@ -36,8 +36,11 @@ function _param_test_setup(; maxt = 2)
     close!(ch)
     update!(ch, 0.0)
     free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
+    # Two forms of the same map: the non-parametric SVK term takes the `Dict`,
+    # the parametric assembly path takes the dense vector.
     free_to_local = Dict(d => i for (i, d) in enumerate(free))
-    return (; grid, dh, cv, free, free_to_local, n_free = length(free))
+    return (; grid, dh, cv, free, free_to_local,
+        f2l = PG.free_dof_map(ndofs(dh), free), n_free = length(free))
 end
 
 const E_TEST, ν_TEST, ρ_TEST = 160e3, 0.22, 2.32e-3
@@ -53,7 +56,7 @@ _geom_identity(x₀) = (one(Tens3), zero(Tens3))
     b = PG.GeometryParameterBasis([1])                     # one parameter, ∇ψ = 0 ⇒ J(θ) ≡ I
     stress = SVK.IsotropicStress(λ_TEST, μ_TEST)
     cache = PG.PullbackCache(s.dh, s.cv, _geom_identity, b; det_powers = [2, 3])
-    pd = PG.ParametricDiscretisation(s.dh, s.cv, s.free_to_local, s.n_free, cache)
+    pd = PG.ParametricDiscretisation(s.dh, s.cv, s.f2l, s.n_free, cache)
     α0 = findfirst(α -> all(iszero, α), b.mset.exponents)
 
     @testset "linear operators ≡ svk_assemble_KM!" begin
