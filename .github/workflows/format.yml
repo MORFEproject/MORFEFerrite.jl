@@ -1,0 +1,64 @@
+name: Format
+
+# SciML style, per .JuliaFormatter.toml at the repository root — the same style and the
+# same pinned formatter version MORFE.jl uses, so code moving between the two repositories
+# does not change shape on arrival.
+#
+# The formatter environment lives in .github/format/ and pins JuliaFormatter exactly,
+# Manifest included: its output depends on its own dependencies (CSTParser, Tokenize),
+# so an unpinned run would reformat files nobody touched and turn this check red.
+# Bump the pin deliberately, together with a reformat commit.
+#
+# Run the identical check locally — same environment, therefore the same output:
+#
+#   julia --project=.github/format -e 'using Pkg; Pkg.instantiate()'
+#   julia --project=.github/format -e 'using JuliaFormatter; format(["src", "ext", "test"])'
+#
+# ── Why this runs on demand only, for now ────────────────────────────────────────────
+# This repository's sources are tab-indented, so the first SciML pass rewrites most of
+# `src/`, `ext/` and `test/`. Enabling the check on `push` before that reformat has landed
+# would report failure on every commit for reasons unrelated to the commit. The sequence
+# is: commit the work in flight → run the reformat as its own labelled commit → add
+# `push:` and `pull_request:` to the triggers below.
+#
+# `examples/` is deliberately outside the target list: each example carries its own
+# environment and is edited independently of the library.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+
+      - name: Cache packages
+        uses: julia-actions/cache@v2
+
+      - name: Install formatter
+        run: julia --project=.github/format -e 'using Pkg; Pkg.instantiate()'
+
+      # `format` returns true when nothing needed changing, so this doubles as the gate:
+      # a non-zero exit means the tree is unformatted, and the diff below shows the
+      # contributor exactly what to apply.
+      - name: Check formatting
+        run: |
+          julia --project=.github/format -e '
+            using JuliaFormatter
+            ok = format(["src", "ext", "test"]; verbose = true)
+            if !ok
+                @warn "Files were reformatted. Review and commit the changes."
+                exit(1)
+            end'
+
+      - name: Show required changes
+        if: failure()
+        run: git diff

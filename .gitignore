@@ -19,6 +19,10 @@ __pycache__/
 .claude
 CLAUDE.md
 
+# The formatter environment is pinned on purpose, Manifest included, so that everyone
+# and CI produce byte-identical formatting. It lives beside the workflow that runs it.
+!.github/format/Manifest.toml
+
 # Knowledge graph: regenerated machine state (AST cache, snapshots, HTML).
 # Rebuild with `graphify update .`.
 graphify-out/
