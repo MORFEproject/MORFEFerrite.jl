@@ -1,19 +1,19 @@
 """
 	AbstractAssembledModel
 
-Supertype for every physics backend's assembled-model object — the thing that holds the
-FE spaces, the assembled operators and whatever else that physics needs, before any
-reduction is chosen.
+Supertype for a physics backend's assembled full-order data: FE spaces, assembled
+operators, material data, and any backend-specific factories needed before a reduction
+is chosen.
 
-Each backend subtypes it and implements exactly one method of [`build_model`](@ref).
-There is no wrapper "case" type: dispatch happens on the backend's own struct.
+Each concrete subtype implements [`build_model`](@ref). Dispatch is on the backend's
+assembled-model type; no additional wrapper "case" type is required.
 """
 abstract type AbstractAssembledModel end
 
 """
 	build_model(m::AbstractAssembledModel; kwargs...) -> (; model, spectral, meta)
 
-Turn an assembled physics model into what a reduction consumes.
+Construct the full-order model and spectral data consumed by a reduction.
 
 **This is the single contract every MORFEFerrite physics module implements.** The first
 two fields are exactly what `MORFE.parametrise` takes:
@@ -23,35 +23,36 @@ two fields are exactly what `MORFE.parametrise` takes:
 W, R = parametrise(model, spectral, expansion_order)
 ```
 
-Keyword arguments are the backend's own — which modes are master, what forcing to apply,
-how many eigenpairs to compute — because those are physics-specific. What is *not*
-backend-specific is the return type, and that is the point: everything downstream of
-`build_model` is shared.
+Keyword arguments are backend-specific: they may select master modes, add forcing,
+configure diagnostics, or request/reuse an eigensolve. The return shape is shared, so
+everything downstream of `build_model` can remain physics-independent.
 
 The return is a `NamedTuple`, not a positional tuple, so that a backend can grow what it
 reports without breaking callers who only want `model` and `spectral`.
 
 - `model`   — an `NthOrderModel`
 - `spectral` — a `SpectralData`
-- `meta`    — **backend-private**. Whatever that physics needs to report afterwards
-  (timings, the raw spectrum, forcing records, DOF maps). MORFE never sees it.
+- `meta`     — backend metadata such as timings, the raw spectrum, forcing records, or
+  DOF maps. It is available to callers and reporting code but is not consumed by MORFE.
 
 Implementations must:
 
 - return an `NthOrderModel` whose `linear_terms` and nonlinear terms are complete,
   including any external system the forcing introduces — not "mostly built, the caller
   adds forcing";
-- return a `SpectralData` reconciled against **that** model's order (use
-  `SpectralData(model, spectrum; master = …)`, which slices when the orders match and
-  extends only when the model's `ORD` is higher — do not hand-roll the extension);
+- return a `SpectralData` reconciled against **that** model's order. Use
+  `SpectralData(model, spectrum; master = …)` so MORFE owns any order reconciliation;
 - apply conditioning tweaks (mode scaling, unit changes) to the **raw arrays before**
   constructing the bundle; `SpectralData` deliberately has no `scale` field, so such
   tweaks stay visible at the call site;
-- build any conjugate permutation with `full_conjugate_permutation(master_block, sys)`,
-  never a literal.
+- provide the spectrum's actual conjugate pairing to `SpectralData`; if a full reduced
+  variable permutation is needed, extend the master pairing through the model's external
+  system with `full_conjugate_permutation` rather than a fixed literal.
 
 Implementations must **not** build a `MultiindexSet`, a `ResonanceSet` or a resonance
 policy, validate the monomial set, derive conjugate closure, warn about resonances, or
-solve anything. Those are `parametrise`'s, chosen by the caller.
+solve the cohomological equations. Those are `parametrise`'s responsibilities and are
+chosen by the caller. A backend may solve its linear eigenproblem here, or reuse spectral
+data supplied by the caller.
 """
 function build_model end

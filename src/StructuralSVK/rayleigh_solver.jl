@@ -2,15 +2,14 @@
 	RayleighEigensolver <: AbstractEigensolver
 
 Solves the undamped eigenproblem K ϕ = ω² M ϕ and recovers the damped
-eigenvalues λ = ω(-ξ ± i√(1-ξ²)) using Rayleigh damping ξ = ½(α/ω + βω).
-
-The implementation is covered by the StructuralSVK eigensolver and reduction
-tests.
+eigenvalues `λ = -ξω ± iω√(1-ξ²)` using Rayleigh damping
+`ξ = 0.5(α/ω + βω)`. The complex square root also represents critically damped
+and overdamped modes.
 
 The damping is carried as the model's own [`RayleighDamping`](@ref) rather than a
-loose `(α, β)` pair. The solver's `ξ` and the model's `C = αM + βK` must describe
-the same structure; passing the object makes that one value instead of two that
-have to be kept in step by hand.
+loose `(α, β)` pair. The solver computes and stores right eigenvectors and
+eigenvalues during `eigensolve`; `eigensolve_left` then constructs the analytic
+left blocks for the symmetric second-order pencil.
 """
 mutable struct RayleighEigensolver <: AbstractEigensolver
     right_eig_result::Union{Nothing, Matrix}
@@ -22,8 +21,10 @@ end
 """
 	RayleighEigensolver(nev, damping::RayleighDamping)
 
-Solver for `nev` modes of a structure with this damping. Take `damping` from the
-assembled model (`m.damping`) so the spectrum matches the model's `C`.
+Construct a stateful solver for `nev` undamped physical modes. A solve returns
+`2nev` damped eigenvalues in adjacent conjugate pairs and caches the right
+eigenvectors needed by the left solve. Pass the assembled model's own
+`m.damping` so these eigenvalues remain consistent with `m.C = αM + βK`.
 """
 function RayleighEigensolver(nev::Integer, damping::RayleighDamping)
     RayleighEigensolver(nothing, nothing, Int(nev),

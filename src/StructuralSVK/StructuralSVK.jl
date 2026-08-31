@@ -1,21 +1,24 @@
 """
-`MORFEFerrite.StructuralSVK` — high-level "mesh → ROM" UI for St. Venant-Kirchhoff
-structural models with the Ferrite backend, autonomous or with near-resonant
-harmonic forcing.
+`MORFEFerrite.StructuralSVK` — Ferrite-backed St. Venant-Kirchhoff structural
+models for autonomous or harmonically forced invariant-manifold reductions.
 
     using MORFE, MORFEFerrite
     const SVK = MORFEFerrite.StructuralSVK
     beam = SVK.mechanical_model(mesh; material, damping, dirichlet, fe_order, quad_order)
 
-    (; model, spectral, meta) = build_model(beam; master = [1], expansion_order = 9)
-    W, R = parametrise(model, spectral, 9;
+    (; model, spectral, meta) = build_model(beam;
+        master = [1], expansion_order = 9)
+    W, R = MORFE.parametrise(model, spectral, 9;
         resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
 
-**There is one `parametrise` and it is MORFE's.** This module contributes
-`build_model` — the single contract every physics backend implements — and
-returns the same physics-independent `(W, R)` result as every other backend. The Ferrite SVK geometric
-nonlinearity factory is `svk_nonlinearity` and the linear stiffness/mass assembler
-is `svk_assemble_KM!` (a concrete `MORFE.FEMMultilinearMap` backend).
+This module assembles the mechanical case, implements the shared [`build_model`](@ref)
+contract, and provides spectral and resonance-inspection helpers. `build_model` returns
+the `MORFE.NthOrderModel` and `MORFE.SpectralData`; `MORFE.parametrise` performs the
+physics-independent reduction and returns `(W, R)`.
+
+The low-level Ferrite entry points are [`svk_nonlinearity`](@ref), which constructs a
+concrete `MORFE.FEMMultilinearMap{2}`, and [`svk_assemble_KM!`](@ref), which assembles
+the linear stiffness and mass matrices.
 """
 module StructuralSVK
 
@@ -36,10 +39,19 @@ import ..Common: build_model, summary_entries
 include("ferrite_assembly.jl")
 
 """
-    svk_nonlinearity(degree, dh, cv, free_to_local, n_free, λ, μ; max_unique_cols = degree)
+    svk_nonlinearity(degree, dh, cv, free_to_local, n_free, λ, μ;
+                     max_unique_cols = degree, fully_asymmetric = false)
+    svk_nonlinearity(degree, dh, cv, free_to_local, n_free, material;
+                     max_unique_cols = degree, fully_asymmetric = false)
 
 Construct a Ferrite-backed St. Venant-Kirchhoff geometric nonlinearity term of the
-given polynomial `degree` (2 = quadratic, 3 = cubic) as a `MORFE.FEMMultilinearMap{2}`.
+given polynomial `degree` (`2` for the quadratic form, `3` for the cubic form) as a
+`MORFE.FEMMultilinearMap{2}`. The constitutive law may be supplied as Lamé constants
+`λ`, `μ` or as an `SVKMaterial`/`AnisotropicMaterial`.
+
+`free_to_local` maps global Ferrite DOFs into the `n_free`-component state. The
+`max_unique_cols` cache must accommodate the column batches used by the reduction;
+`fully_asymmetric` is forwarded to MORFE's multilinear-term symmetry policy.
 """
 function svk_nonlinearity(degree::Integer, args...; kwargs...)
     FerriteGeometricNonlinearity{Int(degree)}(args...; kwargs...)
@@ -47,8 +59,12 @@ end
 
 """
     svk_assemble_KM!(K, M, dh, cv, λ, μ, ρ)
+    svk_assemble_KM!(K, M, dh, cv, material)
 
-Assemble the linear stiffness `K` and mass `M` matrices with the Ferrite SVK backend.
+Assemble the three-dimensional linear stiffness `K` and mass `M` matrices in place
+with the Ferrite SVK backend. Supply either Lamé constants and density or an
+`SVKMaterial`/`AnisotropicMaterial`. `K` and `M` must be preallocated with the
+sparsity pattern of `dh`; the function returns `nothing`.
 """
 svk_assemble_KM!(args...; kwargs...) = assemble_KM!(args...; kwargs...)
 

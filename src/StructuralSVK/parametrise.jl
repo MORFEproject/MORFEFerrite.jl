@@ -9,15 +9,23 @@ Build the monomial set and the complex-normal-form `ResonanceSet` that a
 [`eigenfrequencies`](@ref) to preview — before paying for the cohomological
 solve — which monomials will be kept in the reduced dynamics.
 
-`resonance_tol` is the absolute detuning threshold (rad/s); `resonance_tol_rel`,
-when given, replaces it by the per-target relative threshold
-`resonance_tol_rel * |λⱼ|`.
+`master` uses the same sorted physical-pair indexing as `build_model`: pair `p`
+occupies `eigenvalues[2p-1:2p]`. `external_eigenvalues` appends prescribed
+external coordinates to the monomial variables. If `mset` is omitted, all
+monomials of total degree `1:order` in the internal and external variables are
+created; otherwise the supplied set is returned and `order` does not choose its
+contents.
+
+`resonance_tol` is the absolute detuning threshold in the eigenvalues' frequency
+units (rad/s for structural spectra). When `resonance_tol_rel` is given, the
+inner target `λⱼ` instead uses `resonance_tol_rel * abs(λⱼ)`.
 
 `outer_eigenvalues` adds off-manifold resonance targets, populating the
 `outer_resonances` block of the returned set (query it with
 `resonant_multiindices(rset, ROM + j)`). Those flags are diagnostic: the
 cohomological solve reads only the inner block. It cannot be combined with
-`resonance_tol_rel` — see the assertion below.
+`resonance_tol_rel`, because MORFE shares one tolerance object between the inner
+and outer target blocks.
 """
 function resonances(eigenvalues::AbstractVector, master::Vector{Int}, order::Int;
 	external_eigenvalues::Vector{ComplexF64} = ComplexF64[],
@@ -50,8 +58,11 @@ end
 """
 	print_resonances(mset, resonance_set, master_eigenvalues; io = stdout)
 
-List, per reduced-dynamics target, the monomials flagged as resonant — the terms
-that survive in the reduced dynamics `R`.
+Print the monomials flagged as resonant for each inner target and any diagnostic
+outer targets. Inner targets are labelled with `master_eigenvalues`; because this
+function is not passed the outer eigenvalues, outer target labels use `0` as a
+placeholder. Inner resonances are the terms retained in the reduced dynamics `R`;
+outer flags diagnose off-manifold solves and do not add rows to `R`.
 """
 function print_resonances(mset, resonance_set, master_eigenvalues::Vector{ComplexF64};
 	io::IO = stdout)

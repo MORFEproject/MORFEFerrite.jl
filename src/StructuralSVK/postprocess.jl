@@ -2,9 +2,15 @@
 	spectrum(m::AssembledMechanicalModel; nev = 10, eigensolver = nothing)
 		-> Spectrum
 
-Solve the model's eigenproblem. Pass the result to `build_model` as
-`spectrum = …` to inspect the spectrum first without paying for a second
-solve — and so that inspecting it cannot perturb the ROM.
+Solve the assembled model's eigenproblem. `nev` requests physical modes; the
+default `RayleighEigensolver` returns `2nev` eigenvalues and eigenmodes in adjacent
+conjugate pairs. A supplied `eigensolver` is used as-is. In particular, callers
+supplying a different modal-damping solver are responsible for making its damping
+consistent with `m.C`.
+
+Pass the returned `MORFE.Spectrum` to `build_model` as `spectrum = ...` to inspect
+or report it without paying for a second solve—and without letting a repeated
+iterative eigensolve choose a different basis in a clustered eigenspace.
 """
 function spectrum(m::AssembledMechanicalModel; nev::Int = 10, eigensolver = nothing)
     solver = eigensolver === nothing ? RayleighEigensolver(nev, m.damping) : eigensolver
@@ -20,10 +26,14 @@ end
 	eigenfrequencies(m::AssembledMechanicalModel; nev = 10, eigensolver = nothing)
 		-> Vector{ComplexF64}
 
-Damped eigenvalues of the assembled model, ordered in conjugate pairs: physical
-mode `p` occupies entries `2p-1, 2p`, so `abs(λ[2p-1]) / 2π` is its frequency in
-Hz. Use it to inspect the spectrum — and pick `master` — before committing to a
-parametrisation.
+Return the complex damped eigenvalues from [`spectrum`](@ref). Physical mode `p`
+occupies adjacent conjugate entries `2p-1, 2p`. For an underdamped pair,
+`abs(imag(λ[2p-1]))/(2π)` is its damped oscillation frequency in Hz; the
+undamped natural frequency `ω` used by the Rayleigh construction is distinct.
+For an underdamped or critically damped mode `abs(λ) = ω`; this identity does
+not hold for each individual eigenvalue of an overdamped pair.
+
+Use the result to inspect the spectrum and choose `master` before parametrisation.
 """
 function eigenfrequencies(m::AssembledMechanicalModel; kwargs...)
     collect((spectrum(m; kwargs...)).eigenvalues)
@@ -32,8 +42,10 @@ end
 """
 	print_mode_table(eigenvalues; master = Int[], io = stdout)
 
-Tabulate the physical modes behind `eigenvalues` (one row per conjugate pair:
-decay rate, frequency in Hz and rad/s), marking the pairs listed in `master`.
+Tabulate adjacent conjugate pairs in `eigenvalues`, ignoring an unmatched final
+entry. Each row reports `real(λ)` as the decay rate and `imag(λ)` as the damped
+angular frequency, together with `imag(λ)/(2π)` in Hz. Pairs listed in `master`
+are marked. Output is written to `io` and the function returns `nothing`.
 """
 function print_mode_table(eigenvalues::AbstractVector; master::Vector{Int} = Int[],
         io::IO = stdout)

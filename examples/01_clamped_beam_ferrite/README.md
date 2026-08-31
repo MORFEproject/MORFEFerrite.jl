@@ -22,6 +22,17 @@ in `meta`.
 
 ## Run
 
+From the repository root, initialise this example's environment once:
+
+```bash
+julia --project=examples/01_clamped_beam_ferrite -e \
+  'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+```
+
+This uses the MORFEFerrite source in the current checkout and downloads the
+registered MORFE release. The generated `Manifest.toml` stays local and is not
+committed, so it contains no machine-specific paths in the repository.
+
 Open and execute [`clamped_beam.ipynb`](clamped_beam.ipynb). Its committed
 outputs use order 3 so that the demonstration remains quick. The string
 `dirichlet = "Dirichlet"` selects the facet group named `Dirichlet` in the Gmsh
@@ -33,7 +44,7 @@ From a shell:
 ```bash
 cd examples/01_clamped_beam_ferrite
 jupyter nbconvert --execute --to notebook --inplace clamped_beam.ipynb
-julia --project=. validate.jl
+MORFE_FAST=1 julia --project=. validate.jl
 ```
 
 Change `order = 3` to `order = 9` in the notebook to reproduce the conservative

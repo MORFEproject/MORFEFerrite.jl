@@ -6,8 +6,8 @@
 """
 	_forcings(forcing) -> Vector{<:HarmonicForcing}
 
-Normalise the `forcing` keyword (`nothing`, a single `HarmonicForcing`, or a
-vector of them) to a vector — empty when the problem is autonomous.
+Normalize the public `forcing` forms—`nothing`, one `HarmonicForcing`, or an
+abstract vector of them—to a vector. The autonomous case returns an empty vector.
 """
 _forcings(::Nothing) = HarmonicForcing[]
 _forcings(f::HarmonicForcing) = [f]
@@ -27,27 +27,47 @@ _n_multiindices(nvar::Int, order::Int) = binomial(nvar + order, order) - 1
 
 """
 	build_model(m::AssembledMechanicalModel; master = [1], forcing = nothing,
-				nev = ..., spectrum = nothing) -> (; model, spectral, meta)
+				nev = ..., spectrum = nothing, expansion_order = nothing,
+				n_monomials = nothing) -> (; model, spectral, meta)
 
-Assemble the full-order model and its spectral data — what
-`MORFE.parametrise(model, spectral, expansion_order)` consumes.
+Construct the full-order `MORFE.NthOrderModel` and `MORFE.SpectralData` consumed by
+`MORFE.parametrise`.
 
-This is StructuralSVK's implementation of the [`build_model`](@ref) contract, and it is
-where every SVK-specific convention lives:
+`master` is a nonempty, sorted vector of distinct positive **physical mode-pair**
+indices. The eigensolver returns adjacent conjugate eigenvalues, so pair `p` occupies
+spectrum entries `2p-1, 2p`; for example, `master = [1]` gives `ROM = 2` internal
+coordinates. Selected pairs may be non-leading and non-contiguous.
 
-- **`master` lists physical mode PAIRS.** Eigenvalues come in conjugate pairs, so physical
-  mode `p` occupies spectrum entries `2p-1, 2p`; `master = [1]` means `ROM = 2`. The pairs
-  need not be leading or contiguous.
-- **`forcing`** takes one [`HarmonicForcing`](@ref) or a vector of them, giving
-  `f(t) = Σₖ aₖ · M·ϕ_{pₖ} · cos(Ωₖ t)`. Each appends its own conjugate pair of external
-  states with eigenvalues `±iΩₖ`, so `N_EXT = 2·length(forcing)`. A forcing whose shape
-  mode is not a master pair is allowed — it only supplies the load shape.
-- **`spectrum`** reuses an already-solved [`spectrum`](@ref) instead of solving again;
-  `nev` sizes the solve when one is needed.
+`forcing` accepts `nothing`, one [`HarmonicForcing`](@ref), or a vector of them and
+represents
 
-The conjugate permutation is derived rather than written out: the master block pairs
-adjacent modes, and the external block comes from the external system itself, so it stays
-correct for an odd `N_EXT` or a change of external coordinates.
+```
+f(t) = Σₖ aₖ M ϕ_{pₖ} cos(Ωₖ t).
+```
+
+Forcing `k` appends external coordinates `ROM+2k-1, ROM+2k` with eigenvalues
+`+iΩₖ, -iΩₖ`. If `Ωₖ` is omitted it is `abs(spectrum.eigenvalues[2pₖ-1])`.
+The shape pair `pₖ` need not be a master pair.
+
+If `spectrum` is omitted, [`spectrum`](@ref) is called with `nev`, where `nev`
+counts physical modes (and the returned spectrum contains `2nev` conjugate
+eigenvalues). A supplied spectrum is reused without another eigensolve. In either case
+it must contain every master pair and every pair used as a forcing shape.
+
+`expansion_order` and `n_monomials` size the batched-column cache owned by the FEM
+nonlinear terms; they do not construct or select MORFE's monomial set. For the standard
+total-degree set, `expansion_order = p` reserves
+`binomial(ROM + N_EXT + p, p) - 1` columns. For a custom set, pass
+`n_monomials = length(mset)`. `n_monomials` takes precedence if both are supplied;
+if neither is supplied, one column is reserved.
+
+The result contains:
+
+- `model`: the autonomous or forced `MORFE.NthOrderModel`;
+- `spectral`: spectral data restricted to `master`, with the spectrum-wide adjacent
+  conjugate pairing and the external pairing supplied by the model's external system;
+- `meta`: backend reporting data, including the resolved forcings/frequencies, selected
+  spectrum indices, external-state count, eigensolve time, and assembled-case metadata.
 """
 function build_model(m::AssembledMechanicalModel;
         master::Vector{Int} = [1],

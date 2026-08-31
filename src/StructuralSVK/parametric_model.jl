@@ -14,26 +14,34 @@ using ..ParametricGeometry: PullbackCache, ParametricDiscretisation, ParametricM
 
 """
 	parametric_model(dh, cv, geometry; geometry_parameter_basis, material, damping,
-					 free = …, base = nothing) -> AssembledParametricModel
+					 free = nothing, base = nothing,
+					 inverse_determinant = PowerSeriesInverseDet())
+		-> AssembledParametricModel
 
-Expand an SVK structure over a parametric mesh coordinate transform.
+Assemble the parameter expansion of a three-dimensional SVK structure over a
+parametric mesh coordinate transform.
 
 `geometry` is a provider returning `(J₀, ∇ψ₁, …, ∇ψ_Nθ)` per quadrature point,
 either analytically (`geom(x₀)`) or from an FE field (`geom(x₀, cell, cv, q)`).
 
-`geometry_parameter_basis` is either one [`GeometryParameterBasis`](@ref) used for every form, or a
-`NamedTuple` `(; linear, quadratic, cubic)` when the forms have different exact
-polynomial degrees — the arch, for instance, has `K(θ)` of degree ≤ 2 but a
-cubic form of degree ≤ 4, and truncating them all at the largest is wasted work.
+`geometry_parameter_basis` is either one [`GeometryParameterBasis`](@ref), shared
+by every form, or a `NamedTuple` with a required `linear` entry and optional
+`quadratic` and `cubic` entries. A missing `quadratic` basis falls back to
+`linear`; a missing `cubic` basis falls back to `quadratic`, then `linear`.
+Separate bases avoid over-expanding low-degree forms—for example, an isochoric
+affine arch has stiffness degree at most two but cubic-form degree at most four.
 
-`damping` is a [`RayleighDamping`](@ref), not a loose `(α, β)` pair: the
-parametric damping series `C(θ) = αM(θ) + βK(θ)` and the model's own `C` must
-describe the same structure, and passing the object makes that one value rather
-than several kept in step by hand.
+`material` is an [`SVKMaterial`](@ref) or [`AnisotropicMaterial`](@ref).
+`damping` is a [`RayleighDamping`](@ref) and defines the assembled series
+`C(θ) = αM(θ) + βK(θ)`. If `free` is omitted, every DOF in `dh` is retained;
+otherwise it supplies the global free-DOF indices. `base` is stored in the
+returned case for physics-side bookkeeping. `inverse_determinant` selects how
+the pullback cache constructs the series for `1/det(J)`.
 
-The returned model is `ORD = 3` — a parametric mass is a correction on the
-highest derivative, which only exists one order up, so the fourth linear block
-is zero.
+This function returns an assembled parametric case, not an `NthOrderModel`.
+Calling [`build_model`](@ref) on it produces `ORD = 3`: a parameter-dependent
+mass is a correction on the highest derivative of the original second-order
+system, so the augmented representation needs one additional, zero linear block.
 """
 function parametric_model(dh, cv, geometry;
 	geometry_parameter_basis,
@@ -123,8 +131,9 @@ end
 """
 	base_operators(m::AssembledParametricModel) -> (K, M)
 
-The θ⁰ stiffness and mass of a parametric SVK model — the base configuration's
-operators, which is what the eigenproblem is solved on.
+Return the `θ = 0` stiffness and mass coefficient matrices of an assembled
+parametric SVK case. These are the base-configuration operators used to solve
+the eigenproblem supplied to `build_model`.
 """
 base_operators(m::AssembledParametricModel) =
 	(m.operators[1].arrays[1], m.operators[3].arrays[1])

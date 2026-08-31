@@ -3,6 +3,7 @@ Manifest.toml
 
 # Generated example outputs
 examples/*/results/
+scripts/results/
 .DS_Store
 */.DS_Store
 examples/09_electromechanical/DPIM_EMT3/DPIM_EMT3.7z

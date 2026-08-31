@@ -4,9 +4,26 @@ _refshape(::Ferrite.AbstractCell{RS}) where {RS} = RS
 """
     mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
                      material, damping, fe_order = 2, quad_order = fe_order + 1)
+    mechanical_model(grid::Ferrite.Grid; material, damping, dirichlet,
+                     fe_order = 2, quad_order = fe_order + 1)
+    mechanical_model(mesh_path::AbstractString; material, damping, dirichlet,
+                     scale = 1.0, fe_order = 2, quad_order = fe_order + 1)
 
-Build an `AssembledMechanicalModel` from a Ferrite grid and a pre-computed set
-of constrained node indices (all three displacement components clamped).
+Assemble a three-dimensional `AssembledMechanicalModel` from a Ferrite grid or
+mesh file. The displacement interpolation is `Lagrange{RefShape,fe_order}()^3`;
+the returned `K`, `M`, and `C = αM + βK` are restricted to free DOFs, while the
+model retains the Ferrite handlers needed to construct its quadratic and cubic
+SVK terms lazily.
+
+`material` is an [`SVKMaterial`](@ref) or [`AnisotropicMaterial`](@ref), and
+`damping` is a [`RayleighDamping`](@ref). All three displacement components are
+fixed on the selected nodes or facets:
+
+- The `constrained_nodes` overload accepts an already computed set of node indices.
+- For a Ferrite grid or Gmsh `.msh` path, `dirichlet` is the name of a facet set.
+- For a COMSOL `.mphtxt` path, `dirichlet` is a `Set{Int}` of 1-based boundary
+  entity IDs (the raw COMSOL IDs plus one). `scale` rescales COMSOL node
+  coordinates before assembly; it is ignored for Gmsh input.
 """
 function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
         material::Union{SVKMaterial, AnisotropicMaterial},
@@ -51,18 +68,6 @@ function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
             dh = dh, cellvalues = cv, free_to_local = free_to_local))
 end
 
-"""
-    mechanical_model(grid::Ferrite.Grid; material, damping, dirichlet,
-                     fe_order = 2, quad_order = fe_order + 1)
-    mechanical_model(mesh_path::AbstractString; material, damping, dirichlet, ...)
-
-Build an `AssembledMechanicalModel` (K, M, C on free DOFs + lazy SVK
-nonlinearity factory) from a Ferrite grid or a mesh file.
-
-- Gmsh `.msh`: pass `dirichlet` as a **String** naming the clamped facetset.
-- COMSOL `.mphtxt`: pass `dirichlet` as a `Set{Int}` of boundary entity IDs
-  (1-indexed, i.e. raw COMSOL ID + 1).
-"""
 function mechanical_model(grid::Ferrite.Grid;
         material::Union{SVKMaterial, AnisotropicMaterial},
         damping::RayleighDamping,

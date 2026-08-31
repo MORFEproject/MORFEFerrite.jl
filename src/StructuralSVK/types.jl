@@ -2,8 +2,10 @@
     SVKMaterial(; E, ν, ρ)
 
 St. Venant-Kirchhoff material: Young's modulus `E`, Poisson ratio `ν`,
-density `ρ`. Lamé constants `λ`, `μ` are derived. The SVK model generates
-quadratic and cubic nonlinearities in the displacement — nothing higher.
+density `ρ`, and derived Lamé constants
+`λ = Eν/((1+ν)(1-2ν))`, `μ = E/(2(1+ν))`. With the Green-Lagrange strain and
+this linear elastic stress law, the internal force has quadratic and cubic
+displacement terms and no higher-degree terms.
 """
 struct SVKMaterial{T}
     E::T
@@ -21,7 +23,8 @@ end
 """
     RayleighDamping(; α, β)
 
-Rayleigh damping `C = α M + β K`.
+Rayleigh damping coefficients defining `C = α M + β K`. The constructor promotes
+`α` and `β` to a common numeric type.
 """
 struct RayleighDamping{T}
     α::T
@@ -32,15 +35,17 @@ RayleighDamping(; α, β) = RayleighDamping(promote(α, β)...)
 """
     HarmonicForcing(; mode, amplitude, Ω = nothing)
 
-Harmonic load `f(t) = amplitude · M·ϕ_mode · cos(Ω t)`: shaped like mode
-`mode`, oscillating at that same mode's natural frequency unless `Ω` is given.
+Harmonic load specification for
+`f(t) = amplitude · M*ϕ_mode · cos(Ω*t)`. `mode` is a positive physical
+mode-pair index used only for the load shape. If `Ω` is omitted, `build_model`
+uses `abs(λ[2mode-1])` from the resolved spectrum.
 
 `build_model` accepts either one of these or a vector of them (multi-harmonic
 excitation); each element adds its own pair of external states with eigenvalues
 ±iΩ, so `N_EXT = 2 · length(forcing)`. `mode` need not be a `master` pair — it
-only supplies the load shape — but `parametrise` warns if Ω is near-resonant
-with a mode left off the manifold, which makes that direction's solve
-ill-conditioned however the load is shaped.
+only supplies the load shape. MORFE's parametrisation may separately warn when a
+monomial frequency is near an eigenvalue left off the manifold, because that
+off-manifold solve is ill-conditioned independently of the forcing shape.
 """
 struct HarmonicForcing{T}
     mode::Int
@@ -53,9 +58,17 @@ function HarmonicForcing(; mode, amplitude, Ω = nothing)
 end
 
 """
-Assembled second-order mechanical model `M ü + C u̇ + K u = f_nl(u) (+ forcing)`,
-restricted to free DOFs, with a lazy factory for the FEM nonlinear terms:
-`term_factory(degree, max_cols)` → `FEMMultilinearMap`.
+	AssembledMechanicalModel <: AbstractAssembledModel
+
+Assembled three-dimensional second-order model on the free DOFs. Its linear
+operators are `K`, `C`, and `M`; its FEM multilinear maps accumulate the negative
+quadratic and cubic internal forces, so MORFE's model form represents
+`M*ü + C*u̇ + K*u + f_int,nl(u) = f_ext`.
+
+`term_factory(degree, max_cols)` lazily creates the degree-`2` or degree-`3`
+`MORFE.FEMMultilinearMap{2}` with storage for `max_cols` batched columns.
+`material`, `damping`, and `info` retain backend data used by eigensolvers,
+post-processing, and summaries.
 """
 struct AssembledMechanicalModel{TK, TM, TC, F, MAT, DMP} <: AbstractAssembledModel
     K::TK
@@ -111,8 +124,10 @@ end
 """
     AnisotropicMaterial(D, ρ)
 
-St. Venant-Kirchhoff material with a general 6×6 Voigt stiffness `D` (ordering
-`[11, 22, 33, 23, 13, 12]`, engineering shear strains) and density `ρ`.
+St. Venant-Kirchhoff material with a general 6×6 Voigt stiffness `D`, converted
+to `SMatrix{6,6,Float64}`, and density `ρ`, converted to `Float64`. The ordering
+is `[11, 22, 33, 23, 13, 12]` and the strain vector uses engineering shear
+components `[ε₁₁, ε₂₂, ε₃₃, 2ε₂₃, 2ε₁₃, 2ε₁₂]`.
 
 Use [`CubicCrystal`](@ref) for cubic crystals given by `c₁₁, c₁₂, c₄₄`.
 """
@@ -132,7 +147,8 @@ const _VOIGT_PAIRS = ((1, 1), (2, 2), (3, 3), (2, 3), (1, 3), (1, 2))
 """
     rotate_voigt(D, Q) -> SMatrix{6,6}
 
-Rotate a Voigt stiffness matrix by the orthogonal matrix `Q`.
+Rotate a Voigt stiffness matrix by a 3×3 matrix `Q`, expected to be orthogonal.
+Only its size is validated.
 
 `Q` maps crystal axes to lab axes: if `D` is expressed in the crystal frame, the
 result is expressed in the lab frame (pass `Q'` for the opposite convention).
@@ -166,14 +182,17 @@ function rotate_voigt(D::AbstractMatrix, Q::AbstractMatrix)
 end
 
 """
-    CubicCrystal(; c11, c12, c44, ρ, rotation = I) -> AnisotropicMaterial
+    CubicCrystal(; c11, c12, c44, ρ, rotation = nothing) -> AnisotropicMaterial
 
 Cubic crystal (silicon, germanium, …) from its three independent constants, with
 the crystal optionally rotated into the lab frame by `rotation` (a 3×3 matrix, or
 an angle in radians about the z axis).
 
-The isotropic limit is `c11 = λ + 2μ`, `c12 = λ`, `c44 = μ` — then this material
-reproduces `SVKMaterial(λ, μ)` exactly (asserted by the test suite).
+`rotation = nothing` leaves the crystal axes unchanged; a scalar is interpreted as
+an angle in radians about the z axis, and a matrix is passed to [`rotate_voigt`](@ref).
+
+The isotropic limit is `c11 = λ + 2μ`, `c12 = λ`, `c44 = μ`; it reproduces the
+constitutive response of an `SVKMaterial` with those Lamé constants.
 """
 function CubicCrystal(; c11::Real, c12::Real, c44::Real, ρ::Real, rotation = nothing)
     D0 = zeros(Float64, 6, 6)
@@ -193,8 +212,10 @@ end
 """
     voigt_stiffness(material) -> SMatrix{6,6}
 
-Voigt stiffness of any supported material (`SVKMaterial` returns its isotropic
-matrix), useful for inspection and for cross-checking anisotropic input.
+Return the `SMatrix{6,6,Float64}` Voigt stiffness of a supported material.
+`AnisotropicMaterial` returns its stored matrix; `SVKMaterial` constructs the
+isotropic matrix from its Lamé constants. This is useful for inspection and for
+cross-checking anisotropic input.
 """
 voigt_stiffness(m::AnisotropicMaterial) = m.D
 function voigt_stiffness(m::SVKMaterial)

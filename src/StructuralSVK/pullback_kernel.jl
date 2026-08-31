@@ -94,17 +94,22 @@ end
 end
 
 """
-	SVKPullbackKernel{DEG, S}(stress, ρ)
+	SVKPullbackKernel{DEG}(material)
+	SVKPullbackKernel{DEG}(stress, ρ = 0.0)
 
-St. Venant-Kirchhoff physics over a parametric coordinate transform.
+Three-dimensional St. Venant-Kirchhoff quadrature kernel over a parametric
+coordinate transform. The public constructor accepts an `SVKMaterial` or
+`AnisotropicMaterial`; the lower-level constructor accepts the corresponding
+internal stress-law object and a density.
 
 - `DEG = 2` — the quadratic elastic form `g(u₁,u₂;θ)`
 - `DEG = 3` — the cubic form `h(u₁,u₂,u₃;θ)`
 - `DEG = 0` — the linear operators (stiffness and mass)
 
-`stress` is any [`AbstractStress`](@ref) — the same object the non-parametric
-backend uses, so an anisotropic or cubic-crystal material works parametrically
-with no further code. `ρ` is only read by the `DEG = 0` kernel.
+`DEG = 2` and `DEG = 3` use only the constitutive stress law. `DEG = 0` also
+reads `ρ` to assemble the mass series, so its lower-level constructor must be
+given the material density. The kernel owns reusable quadrature scratch space
+and is intended for one assembly sweep at a time.
 """
 struct SVKPullbackKernel{DEG, S <: AbstractStress} <: AbstractPullbackKernel{DEG}
 	stress::S

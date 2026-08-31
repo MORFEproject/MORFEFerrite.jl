@@ -21,12 +21,13 @@ domains as first-class submodules.
 
 ## Installation
 
-Neither package is registered yet; install both from GitHub:
+MORFE is registered in Julia's General registry. MORFEFerrite is currently
+installed from GitHub:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/MORFEproject/MORFE.jl.git")
-Pkg.add(url="https://github.com/MORFEproject/MORFEFerrite.jl.git")
+Pkg.add("MORFE")
+Pkg.add(url = "https://github.com/MORFEproject/MORFEFerrite.jl.git")
 ```
 
 ## Quick start
@@ -48,9 +49,10 @@ W, R = parametrise(model, spectral, 7;
 
 ## Examples
 
-Self-contained, runnable examples under [`examples/`](examples/) — each
-bootstraps its own environment (clone MORFE.jl next to this repository, or set
-`ENV["MORFE_PATH"]`):
+Self-contained, runnable examples live under [`examples/`](examples/). Example
+01 resolves MORFE from the registry and uses MORFEFerrite from the current
+checkout; its README contains the one-time environment setup command. Some of
+the other examples still use the older sibling-checkout development workflow.
 
 | Folder | Model |
 | ------ | ----- |

@@ -1,19 +1,22 @@
 """
-Ferrite.jl FEM backend for MORFE.jl geometric nonlinearity.
+Ferrite.jl FEM backend for MORFE.jl St. Venant-Kirchhoff elasticity.
 
-Implements `FEMMultilinearMap` for the St. Venant-Kirchhoff material model,
-which generates nonlinearity up to cubic order in the displacement field.
+Implements a three-dimensional `MORFE.FEMMultilinearMap{2}` for the quadratic
+and cubic geometric internal forces and assembles the linear stiffness and mass.
+Both isotropic Lamé elasticity and a general anisotropic Voigt stiffness use the
+same Green-Lagrange strain expansion.
 
 SVK internal virtual work:
-	W_int = ∫ S:δE dΩ
+	δW_int = ∫ S ⊡ δE dΩ
 where:
-	E = ε(u) + ½∇u'∇u          (Green-Lagrange strain)
-	S = λ tr(E) I + 2μ E        (2nd Piola-Kirchhoff stress)
-	δE = δε + sym(∇u' δ∇u)
+	E  = ε(u) + 0.5∇uᵀ∇u
+	S  = σ(E)
+	δE = ε(δu) + sym(∇uᵀ∇δu).
 
-Expanding in powers of u gives quadratic and cubic contributions only.
-Higher-order material models (e.g. polynomial hyperelastic) are needed for
-quartic and higher terms.
+For isotropy, `σ(E) = λ tr(E) I + 2μE`; the anisotropic path applies its Voigt
+matrix instead. Expansion in `u` gives linear, quadratic, and cubic internal
+forces. The multilinear maps below return the negatives of the nonlinear
+internal terms, matching MORFE's `linear = nonlinear` model convention.
 """
 
 # ── Stress models ───────────────────────────────────────────────────────────
@@ -30,8 +33,9 @@ end
 	VoigtStress(D)
 
 Fully anisotropic stress, `σ = D : ε`, with `D` the 6×6 Voigt stiffness in the
-standard ordering `[11, 22, 33, 23, 13, 12]` (engineering shear strains, i.e.
-the strain vector is `[ε₁₁, ε₂₂, ε₃₃, 2ε₂₃, 2ε₁₃, 2ε₁₂]`).
+ordering `[11, 22, 33, 23, 13, 12]`. The input strain tensor is converted to the
+engineering-shear vector `[ε₁₁, ε₂₂, ε₃₃, 2ε₂₃, 2ε₁₃, 2ε₁₂]`; the result is
+returned as a symmetric second Piola-Kirchhoff stress tensor.
 """
 struct VoigtStress <: AbstractStress
 	D::SMatrix{6, 6, Float64, 36}
@@ -65,31 +69,23 @@ end
 # -----------------------------------------------------------------------
 
 """
-	FerriteGeometricNonlinearity{DEG, DH, CV} <: MORFE.FEMMultilinearMap{2}
+    FerriteGeometricNonlinearity{DEG, DH, CV, S} <: MORFE.FEMMultilinearMap{2}
 
-FEM-backed multilinear term for St. Venant-Kirchhoff geometric nonlinearity.
+Three-dimensional FEM-backed multilinear term for the negative SVK geometric
+internal force.
 
-- `DEG = 2` : quadratic g_quad term (two displacement inputs)
-- `DEG = 3` : cubic   h_cube term (three displacement inputs)
+- `DEG = 2`: quadratic form with two displacement inputs.
+- `DEG = 3`: cubic form with three displacement inputs.
 
-Type parameter `ORD = 2` means the multiindex lives in an NthOrderModel of
-order 2 (second-order ODE). The term only uses position-derivative inputs
-(multiindex = (DEG, 0)).
+The `MORFE.FEMMultilinearMap{2}` supertype places the term in a second-order
+model. It uses only position inputs, with `multiindex == (DEG, 0)`, and has no
+external-state factors. `S` is the concrete isotropic or anisotropic stress law.
 
-# Fields
-- `dh`             — DofHandler
-- `cv`             — CellValues (quadrature + interpolation)
-- `free_to_local`  — Dict: global DOF index → 1-based index in the free-DOF vector
-- `n_free`         — number of free DOFs
-- `λ`, `μ`         — Lamé constants
-- `multiindex`     — NTuple{2, Int} = (DEG, 0)
-- `multiplicity_external` — 0 (no external forcing)
-- `deg`            — DEG
-- `∇W_qp`         — pre-allocated qp gradient buffer, Matrix{Tensor{2,3,ComplexF64}}(DEG, n_qp)
-- `Fe`             — pre-allocated element residual, Vector{ComplexF64}(ndofs_per_cell)
-- `u_e`            — pre-allocated element DOF vector, Vector{ComplexF64}(ndofs_per_cell)
-- `u_e_re`         — real part of u_e, Vector{Float64}(ndofs_per_cell)
-- `u_e_im`         — imaginary part of u_e, Vector{Float64}(ndofs_per_cell)
+`dh`, `cv`, `free_to_local`, and `n_free` describe the constrained Ferrite
+discretisation. The remaining storage is reusable evaluation state: the
+quadrature-gradient buffer has size `(max_unique_cols, getnquadpoints(cv))`, and
+the element vectors have `ndofs_per_cell(dh)` entries. A term instance is
+mutable through these buffers and is intended for one evaluation sweep at a time.
 """
 struct FerriteGeometricNonlinearity{DEG, DH, CV, S} <: MORFE.FEMMultilinearMap{2}
 	dh::DH
@@ -109,9 +105,18 @@ struct FerriteGeometricNonlinearity{DEG, DH, CV, S} <: MORFE.FEMMultilinearMap{2
 end
 
 """
-	FerriteGeometricNonlinearity{DEG}(dh, cv, free_to_local, n_free, λ, μ)
+    FerriteGeometricNonlinearity{DEG}(dh, cv, free_to_local, n_free, λ, μ;
+                                       max_unique_cols = DEG,
+                                       fully_asymmetric = false)
+    FerriteGeometricNonlinearity{DEG}(dh, cv, free_to_local, n_free, stress;
+                                       max_unique_cols = DEG,
+                                       fully_asymmetric = false)
 
-Construct with pre-allocated buffers sized from `cv`.
+Construct a degree-`DEG` term from Lamé constants or an internal stress-law
+object. `free_to_local` maps global cell DOFs to the free state. Buffers are
+preallocated from `dh`, `cv`, and `max_unique_cols`; the latter must cover the
+largest column batch evaluated by MORFE. `fully_asymmetric` is stored with the
+same symmetry-policy meaning as on `MORFE.MultilinearMap`.
 """
 function FerriteGeometricNonlinearity{DEG}(
 	dh::DH, cv::CV,
@@ -162,9 +167,10 @@ MORFE.fem_reinit!(element, t::FerriteGeometricNonlinearity) = reinit!(t.cv, elem
 """
 	MORFE.scatter_qp!(∇W_col, W_free, element, t)
 
-Scatter the free-DOF vector `W_free` to per-quadrature-point displacement gradients
-∇W_col[q] = ∇u(ξ_q).  CellValues must already be reinit!-ed for `element` via
-`fem_reinit!` before this call.
+Scatter `W_free` into the cell DOF ordering, inserting zero at constrained DOFs,
+then write the complex displacement gradient at each quadrature point to
+`∇W_col[q]`. `t.cv` must already have been reinitialized for `element` through
+`MORFE.fem_reinit!`.
 """
 function MORFE.scatter_qp!(∇W_col, W_free, element, t::FerriteGeometricNonlinearity)
 	dofs = celldofs(element)
@@ -199,12 +205,14 @@ end
 
 Quadratic geometric nonlinearity integrand at one quadrature point:
 
-	fe_r += mult * [ε(φ_r) ⊡ σ(E_nl(∇u1,∇u2))
+	Fe_r -= mult * [ε(φ_r) ⊡ σ(E_nl(∇u1,∇u2))
 					+ 0.5*(sym(∇u1'⋅∇φ_r) ⊡ σ(ε(∇u2))
-						 + sym(∇u2'⋅∇φ_r) ⊡ σ(ε(∇u1)))] * dΩ
+							 + sym(∇u2'⋅∇φ_r) ⊡ σ(ε(∇u1)))] * dΩ
 
-Implemented by decomposing ∇u1 = A+iB, ∇u2 = C+iD into Float64 tensors and
-expanding the bilinear form over Re/Im to avoid ComplexF64 tensor allocations.
+Here `E_nl(A,B) = sym(0.25(AᵀB + BᵀA))`. The negative sign moves the nonlinear
+internal force to MORFE's right-hand side. The implementation decomposes
+`∇u1 = A+iB`, `∇u2 = C+iD` into `Float64` tensors and expands the bilinear form
+over real and imaginary parts to avoid complex tensor allocations.
 """
 function MORFE.accumulate_qp!(Fe, ∇W_args::NTuple{2}, mult, _element, q, dΩ,
 	t::FerriteGeometricNonlinearity{2})
@@ -257,10 +265,12 @@ end
 
 Cubic geometric nonlinearity integrand at one quadrature point:
 
-	fe_r += mult/3 * Σ_{(i,j,k) cyclic} sym(∇ui'⋅∇φ_r) ⊡ σ(E_nl(∇uj,∇uk)) * dΩ
+	Fe_r -= mult/3 * Σ_{(i,j,k) cyclic} sym(∇ui'⋅∇φ_r) ⊡ σ(E_nl(∇uj,∇uk)) * dΩ
 
-Implemented by decomposing ∇u1=A+iB, ∇u2=C+iD, ∇u3=E+iF into Float64 tensors
-and expanding the trilinear form over Re/Im to avoid ComplexF64 tensor allocations.
+The negative sign moves the nonlinear internal force to MORFE's right-hand side.
+The implementation decomposes all three complex gradients into `Float64` tensors
+and expands the trilinear form over real and imaginary parts to avoid complex
+tensor allocations.
 """
 function MORFE.accumulate_qp!(Fe, ∇W_args::NTuple{3}, mult, _element, q, dΩ,
 	t::FerriteGeometricNonlinearity{3})
@@ -314,8 +324,9 @@ end
 """
 	MORFE.assemble_element!(accum, Fe, element, t)
 
-Scatter element residual `Fe` (indexed by local DOF) into the global free-DOF
-accumulator `accum` (indexed by free-DOF position).
+Add the element residual `Fe`, indexed in cell-DOF order, to the free-state
+accumulator `accum`. Entries corresponding to constrained global DOFs are skipped.
+The function mutates `accum` and returns `nothing`.
 """
 function MORFE.assemble_element!(accum, Fe, element, t::FerriteGeometricNonlinearity)
 	dofs = celldofs(element)
@@ -330,13 +341,18 @@ end
 # -----------------------------------------------------------------------
 
 """
-	assemble_KM!(K, M, dh, cv, λ, μ, ρ)
+    assemble_KM!(K, M, dh, cv, λ, μ, ρ)
+    assemble_KM!(K, M, dh, cv, stress, ρ)
 
-Assemble the global stiffness matrix `K` and mass matrix `M` into pre-allocated
-sparse matrices using standard Galerkin FEM.
+Assemble the three-dimensional global stiffness matrix `K` and mass matrix `M`
+into preallocated sparse matrices using isotropic Lamé constants or an internal
+stress-law object. The matrices must have the sparsity pattern associated with
+`dh`; both are mutated and the function returns `nothing`.
 
-	K_rs = ∫ ε(φ_r) ⊡ (λ tr(ε(φ_s)) I + 2μ ε(φ_s)) dΩ
+	K_rs = ∫ ε(φ_r) ⊡ σ(ε(φ_s)) dΩ
 	M_rs = ∫ ρ φ_r · φ_s dΩ
+
+For the Lamé overload, `σ(ε) = λ tr(ε)I + 2με`.
 """
 assemble_KM!(K, M, dh, cv, λ::Real, μ::Real, ρ::Real) =
 	assemble_KM!(K, M, dh, cv, IsotropicStress(Float64(λ), Float64(μ)), Float64(ρ))
