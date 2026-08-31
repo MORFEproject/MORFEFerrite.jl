@@ -39,7 +39,11 @@ using .FluidNavierStokes
 
 # Re-export the Common public API. `build_model` is the single contract every
 # physics module implements, so it belongs at the top level.
-export load_comsol_grid, AbstractAssembledModel, build_model
+export load_comsol_grid,
+       abaqus_to_gmsh, abaqus_to_gmsh_linear,
+       comsol_to_gmsh, comsol_to_gmsh_linear,
+       gmsh_to_comsol,
+       AbstractAssembledModel, build_model
 # The shared run-summary writer and its per-physics dispatch seam.
 export write_summary, summary_entries
 export write_paraview_mesh, write_paraview_modes,

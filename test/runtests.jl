@@ -4,6 +4,7 @@ using Test
 # and inspects its `(W, R, meta)` outputs directly.
 @testset "MORFEFerrite" begin
     @testset "Common" begin
+        include("Common/test_mesh_io.jl")
         include("Common/test_paraview_2d.jl")
     end
 

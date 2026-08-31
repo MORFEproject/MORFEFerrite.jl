@@ -1,5 +1,5 @@
-# COMSOL .mphtxt → Ferrite grid utilities (no Gmsh dependency).
-# Included by MORFEFerrite.Common, which loads Ferrite.
+# COMSOL .mphtxt → Ferrite grid utilities.
+# Included by MORFEFerrite.Common.MeshIO, which loads Ferrite.
 
 export load_comsol_grid
 
