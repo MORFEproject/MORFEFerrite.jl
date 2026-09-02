@@ -11,23 +11,11 @@
 #   comsol_to_gmsh_linear – quadratic mesh downgraded to linear
 # -------------------------------------------------------------------
 
-import Pkg
-Pkg.activate(@__DIR__)
-if !haskey(Pkg.project().dependencies, "Gmsh")
-    Pkg.add("Gmsh")
-end
-Pkg.instantiate()
-
 using Printf
-
-include(joinpath(@__DIR__, "../../../ext/FEMUtility/ComsolToGmsh.jl"))
-include(joinpath(@__DIR__, "../../../ext/FEMUtility/GmshToComsol.jl"))
-using .ComsolToGmsh
-using .GmshToComsol
 using Gmsh
+using MORFEFerrite: comsol_to_gmsh, comsol_to_gmsh_linear, gmsh_to_comsol
 
-const OUTDIR = joinpath(@__DIR__, "output")
-mkpath(OUTDIR)
+const OUTDIR = mktempdir(; prefix = "morfeferrite-comsol-")
 
 # ===================================================================
 # 1.  COMSOL .mphtxt file generators
@@ -71,7 +59,7 @@ function write_h27_mphtxt(path, nx, ny, nz; Lx = 1.0, Ly = 1.0, Lz = 1.0)
 
     open(path, "w") do io
         # --- header ---
-        println(io, "# Created by MORFE_jl.")
+        println(io, "# Created by MORFEFerrite.jl.")
         println(io)
         println(io, "# Major & minor version")
         println(io, "0 1")
@@ -150,7 +138,7 @@ function write_t10_single_mphtxt(path)
     nn, ne = 10, 1
 
     open(path, "w") do io
-        println(io, "# Created by MORFE_jl.")
+        println(io, "# Created by MORFEFerrite.jl.")
         println(io)
         println(io, "# Major & minor version")
         println(io, "0 1")

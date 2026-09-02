@@ -69,17 +69,45 @@ quadratic and cubic internal forces, so MORFE's model form represents
 `MORFE.FEMMultilinearMap{2}` with storage for `max_cols` batched columns.
 `material`, `damping`, and `info` retain backend data used by eigensolvers,
 post-processing, and summaries.
+
+## Indexing `B`
+
+The linear operators live in one field, in **derivative order**, so `B[k + 1]` is the
+coefficient of the `k`-th time derivative:
+
+	m.B[1]   # B₀ = K, stiffness
+	m.B[2]   # B₁ = C, damping
+	m.B[3]   # B₂ = M, mass
+
+This is the order `MORFE.NthOrderModel.linear_terms` wants, and `m.B` is handed to it
+unchanged. It is also the reason the field exists: the operators used to be three separate
+fields declared `K, M, C` while the model tuple was `(K, C, M)`, so the declaration order
+and the operator order disagreed and every call site had to restate the mapping. It is
+stated once now, here.
+
+`m.K`, `m.C` and `m.M` remain available as read-only properties — for a structural problem
+the physics names read better than an index — and are exactly `B[1]`, `B[2]`, `B[3]`.
 """
-struct AssembledMechanicalModel{TK, TM, TC, F, MAT, DMP} <: AbstractAssembledModel
-    K::TK
-    M::TM
-    C::TC
+struct AssembledMechanicalModel{TB, F, MAT, DMP} <: AbstractAssembledModel
+    B::TB
     term_factory::F
     nonlinear_degrees::Tuple{Vararg{Int}}
     material::MAT
     damping::DMP
     info::NamedTuple
 end
+
+# The physics names, kept because `m.M` says more than `m.B[3]` in a structural context.
+# Derivative order throughout: B₀ = K, B₁ = C, B₂ = M.
+function Base.getproperty(m::AssembledMechanicalModel, s::Symbol)
+    s === :K && return getfield(m, :B)[1]
+    s === :C && return getfield(m, :B)[2]
+    s === :M && return getfield(m, :B)[3]
+    return getfield(m, s)
+end
+
+Base.propertynames(::AssembledMechanicalModel, private::Bool = false) = (:B, :term_factory,
+    :nonlinear_degrees, :material, :damping, :info, :K, :C, :M)
 
 _material_summary(m) = "SVK  E=$(m.E)  ν=$(m.ν)  ρ=$(m.ρ)"
 

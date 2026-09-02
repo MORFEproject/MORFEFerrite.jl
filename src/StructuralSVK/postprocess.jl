@@ -17,7 +17,7 @@ function spectrum(m::AssembledMechanicalModel; nev::Int = 10, eigensolver = noth
     return solver isa StructureModalDampingEigensolver ?
            spectrum(m.K, m.M, solver; sorter! = (args...) -> nothing) :
            spectrum(
-        NthOrderModel((m.K, m.C, m.M),
+        NthOrderModel(m.B,
             Tuple(m.term_factory(d, 1) for d in m.nonlinear_degrees));
         solver = solver, sorter! = (args...) -> nothing)
 end

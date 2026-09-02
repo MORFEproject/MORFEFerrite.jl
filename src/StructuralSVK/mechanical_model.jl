@@ -61,7 +61,8 @@ function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
     factory(deg::Int, max_cols::Int) = svk_nonlinearity(deg, dh, cv,
         free_to_local, n_free, material; max_unique_cols = max_cols)
 
-    return AssembledMechanicalModel(K, M, C, factory, (2, 3), material, damping,
+    # (K, C, M) — DERIVATIVE order, not the order they were assembled in.
+    return AssembledMechanicalModel((K, C, M), factory, (2, 3), material, damping,
         (n_dofs = n_free, n_dofs_total = ndofs(dh), backend = "Ferrite",
             fe_order = fe_order, quad_order = quad_order,
             dirichlet = "$(length(constrained_nodes)) constrained nodes",
@@ -105,7 +106,8 @@ function mechanical_model(grid::Ferrite.Grid;
     factory(deg::Int, max_cols::Int) = svk_nonlinearity(deg, dh, cv,
         free_to_local, n_free, material; max_unique_cols = max_cols)
 
-    return AssembledMechanicalModel(K, M, C, factory, (2, 3), material, damping,
+    # (K, C, M) — DERIVATIVE order, not the order they were assembled in.
+    return AssembledMechanicalModel((K, C, M), factory, (2, 3), material, damping,
         (n_dofs = n_free, n_dofs_total = ndofs(dh), backend = "Ferrite",
             fe_order = fe_order, quad_order = quad_order, dirichlet = dirichlet,
             dh = dh, cellvalues = cv, free_to_local = free_to_local))

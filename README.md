@@ -17,7 +17,8 @@ domains as first-class submodules.
 | `StructuralSVK` | St. Venant-Kirchhoff model construction: `mechanical_model`, `build_model`, `SVKMaterial`, `RayleighDamping`, `HarmonicForcing`, plus the Ferrite geometric-nonlinearity backend (`svk_nonlinearity`, `svk_assemble_KM!`) |
 | `ParametricStructural` | General multi-parameter geometric ROMs: additive map `x(θ,x₀) = x₀ + Σᵢ θᵢψᵢ(x₀)` with per-parameter (multiindex-box) θ-series truncation |
 | `FluidNavierStokes` | Incompressible cylinder-flow DPIM: Taylor-Hood setup, Newton base flow, linearised operators, convection `FEMMultilinearMap` |
-| `Common` | COMSOL `.mphtxt` mesh reading (`load_comsol_grid`) and Paraview/VTK export (`write_paraview_*`, activated by `using WriteVTK`) |
+| `Common.MeshIO` | COMSOL/Abaqus/Gmsh conversion (`comsol_to_gmsh`, `abaqus_to_gmsh`, `gmsh_to_comsol` and linear variants) plus COMSOL-to-Ferrite loading (`load_comsol_grid`); all functions are also exported at package top level |
+| `Common` | Shared assembled-model contracts and Paraview/VTK export (`write_paraview_*`, activated by `using WriteVTK`) |
 
 ## Installation
 
@@ -59,9 +60,11 @@ the other examples still use the older sibling-checkout development workflow.
 | [`01_clamped_beam_ferrite/`](examples/01_clamped_beam_ferrite/) | Clamped-clamped SVK beam — minimal notebook using the common MORFE API |
 | [`03_arch_comsol_wedge/`](examples/03_arch_comsol_wedge/) | Polysilicon arch, COMSOL P18 wedge mesh |
 | [`04_parametric_clamped_beam/`](examples/04_parametric_clamped_beam/) | Two-parameter ROM (axial stretch + bending-mode arch) |
-| [`05_karman_vortex_street/`](examples/05_karman_vortex_street/) | Kármán vortex street — Hopf bifurcation to a Stuart-Landau ROM |
+| [`05_karman_vortex_street/`](examples/05_karman_vortex_street/) | Kármán vortex street — outer-mode promotion study, diagnostics and DNS reference |
 | [`07_parametric_arch/`](examples/07_parametric_arch/) | Single-parameter sinusoidal arch |
 | [`08_mems_micromirror/`](examples/08_mems_micromirror/) | MEMS scanning micromirror from CAD |
+| [`12_karman_hopf/`](examples/12_karman_hopf/) | Kármán vortex street — Hopf bifurcation to a Stuart-Landau ROM, minimal notebook using the common MORFE API |
+| [`mesh_import/`](examples/mesh_import/) | COMSOL/Abaqus/Gmsh conversion examples and reusable source fixtures |
 
 ## Tests
 

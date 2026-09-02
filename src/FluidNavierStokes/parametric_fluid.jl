@@ -213,7 +213,7 @@ function parametric_model(case::AssembledFluidModel, geometry;
 	end
 
 	rel(A, B) = norm(A - B) / max(norm(B), eps())
-	errors = (B0 = rel(B0[1], case.B₀), B1 = rel(B1[1], case.B₁),
+	errors = (B0 = rel(B0[1], case.B[1]), B1 = rel(B1[1], case.B[2]),
 		forcing = norm(hgeom[1]) / max(1.0, norm(case.s₀_full)))
 	errors.forcing <= 1e-10 || throw(ArgumentError(
 		"midpoint pure-parameter residual is $(errors.forcing), above 1e-10; " *
@@ -288,7 +288,7 @@ end
 function build_model(pm::AssembledParametricFluidModel;
 	spectrum, master::AbstractVector{Int} = [1], conjugate_permutation = nothing)
 	L = nterms(pm.basis)
-	zero_block = spzeros(eltype(pm.base.B₀), size(pm.base.B₀)...)
+	zero_block = spzeros(eltype(pm.base.B[1]), size(pm.base.B[1])...)
 	terms = Any[]
 
 	# Geometry corrections to B₀ and the geometry-dependent singular B₁.
@@ -327,7 +327,7 @@ function build_model(pm::AssembledParametricFluidModel;
 	end
 
 	ext = ExternalSystem(pm.include_reynolds ? (0.0 + 0im, 0.0 + 0im) : (0.0 + 0im,))
-	model = NthOrderModel((pm.base.B₀, pm.base.B₁, zero_block), Tuple(terms), ext)
+	model = NthOrderModel((pm.base.B..., zero_block), Tuple(terms), ext)
 	master_indices = reduce(vcat, [[2p - 1, 2p] for p in master])
 	npairs = length(spectrum.eigenvalues) ÷ 2
 	σ = reduce(vcat, [[2p, 2p - 1] for p in 1:npairs])

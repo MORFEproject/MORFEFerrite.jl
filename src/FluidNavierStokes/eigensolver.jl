@@ -78,11 +78,12 @@ _normalise_pair(::NoNormalisation, φ, ψ, α) = (φ, ψ)
 							target_freq = nothing,
 							normalisation = SymmetricBiorthogonal(),
 							scale = 1.0, tol = 0.0, maxiter = 3000,
-							ncv = nothing, verbose = true)
-		-> (; eigenvalues, right_modes, left_modes, all_eigenvalues, all_modes)
+							ncv = nothing, close_conjugates = true,
+							conjugate_rtol = 1e-4, verbose = true)
+		-> (; eigenvalues, right_modes, hopf_index, conjugate_index)
 
-Compute `nev` eigenvalues of `A_lin y = λ B_mass y` by shift-invert ARPACK and
-return the Hopf conjugate pair with its adjoint.
+Compute eigenvalues of `A_lin y = λ B_mass y` by shift-invert ARPACK, close the result
+under conjugation, and point at the Hopf pair.
 
 `sigma_re` offsets the shift from the imaginary axis; `sigma_im` targets a
 frequency band. Neither affects which mode is selected — only the factorisation.
@@ -104,10 +105,32 @@ frequency instead.
   than `1`. `SpectralData` deliberately has no `scale` field so that such a
   tweak stays visible where it is made; this keyword is that visibility.
 
-Returns a `NamedTuple` so the fields are named at every call site: `eigenvalues`
-is the `SVector{2}` Hopf pair (`Im λ₁ > 0`), `right_modes` and `left_modes` are
-`n × 2`, and `all_*` carry the positive-imaginary half of the spectrum sorted by
-`|Re λ|`.
+## The spectrum comes back closed under conjugation
+
+The shift `σ` is **complex**, so ARPACK returns only the modes near `σ` — a strongly
+oscillatory mode's conjugate sits near `σ̄` and is never computed. The result is
+therefore passed through [`close_under_conjugation`](@ref) before it is returned, which
+appends the missing halves analytically (exact, because `A_lin` and `B_mass` are real)
+and makes `conjugate_index` name the true partner of `hopf_index`.
+
+That is on by default because the raw `conjugate_index` is a footgun: it is an `argmin`
+over what ARPACK happened to return, so it names the *nearest available* mode, and
+handing that pair to `build_model` as `master` throws. Two consequences worth stating:
+
+- **`nev` is a lower bound on `length(eigenvalues)`**, not the count. Closure appends.
+- Appended conjugates go at the **end**, not next to their partners, so the result is
+  not a sequence of adjacent pairs.
+
+`close_conjugates = false` returns exactly what ARPACK produced. Pass it when a caller
+must post-process the raw modes before closing — for instance one that phase-aligns a
+tracked eigenvector and needs the synthesised partner to inherit that phase.
+`conjugate_rtol` is forwarded as `close_under_conjugation`'s `rtol`; it is relative
+because ARPACK's numerical zero is ~1e-7 of a mode's magnitude, not machine epsilon.
+
+Returns a `NamedTuple` so the fields are named at every call site: `eigenvalues` is a
+`Vector{ComplexF64}` in ARPACK order with any synthesised conjugates appended,
+`right_modes` is the matching `n × length(eigenvalues)` matrix, and `hopf_index` /
+`conjugate_index` locate the Hopf pair within them.
 """
 function solve_hopf_eigenproblem(
 	A_lin::AbstractSparseMatrix,
@@ -121,6 +144,8 @@ function solve_hopf_eigenproblem(
 	tol::Real = 0.0,
 	maxiter::Int = 3000,
 	ncv::Union{Nothing, Int} = nothing,
+	close_conjugates::Bool = true,
+	conjugate_rtol::Real = 1e-4,
 	verbose::Bool = true,
 )
 	n = size(A_lin, 1)
@@ -183,7 +208,68 @@ function solve_hopf_eigenproblem(
 	# NOTE: no left eigenvectors here. They cost one adjoint factorisation EACH (see
 	# `left_eigenvector`), so they are computed only for the modes a caller actually
 	# puts in the master set — never for the whole spectrum.
-	return (; eigenvalues = vals, right_modes = vecs,
+	raw = (; eigenvalues = vals, right_modes = vecs,
+		hopf_index = i_hopf, conjugate_index = i_conj)
+	close_conjugates || return raw
+
+	# The complex shift returns half of each conjugate pair, so `i_conj` above is an argmin
+	# over the wrong candidate set. Closing here rather than leaving it to the caller is the
+	# difference between a usable master pair and one `build_model` rejects.
+	closed = close_under_conjugation(raw; rtol = conjugate_rtol)
+	if verbose
+		n_added = length(closed.eigenvalues) - length(vals)
+		@printf("  %d analytic conjugates appended; conjugate of the Hopf mode at %d\n",
+			n_added, closed.conjugate_index)
+	end
+	return closed
+end
+
+"""
+	close_under_conjugation(eig; rtol = 1e-4)
+		-> (; eigenvalues, right_modes, hopf_index, conjugate_index)
+
+Complete a computed spectrum with the conjugates the eigensolve could not return, and
+report where the Hopf pair ended up.
+
+[`solve_hopf_eigenproblem`](@ref) shifts at a **complex** `σ`, so ARPACK returns only the
+modes near `σ`. A strongly oscillatory mode's conjugate sits near `σ̄` and is simply never
+computed — at `Re₀ = 49.03` the Kármán mode `λ = 0.004 + 16.859i` comes back while
+`λ̄ = 0.004 − 16.859i` does not. `conjugate_index` as returned by the eigensolve is then the
+*nearest available* eigenvalue rather than the true partner, and passing that pair as
+`master` makes `build_model` throw.
+
+The missing halves are synthesised rather than solved for. `B₀` and `B₁` are real, so
+`(λ̄, φ̄)` is an eigenpair exactly whenever `(λ, φ)` is — this is an identity, not an
+approximation, and it costs nothing. It is also the only way to get the partner with the
+phase `conjugate_permutation` asserts: an independent solve would pin it only up to a
+scalar.
+
+Three cases per computed mode:
+
+- `|Im λ| ≤ rtol·|λ|` — the mode is **real**, hence its own conjugate. Nothing is added;
+  giving it a partner would duplicate the coordinate.
+- the conjugate is already in the set — nothing is added.
+- otherwise `conj(λ)` and `conj.(φ)` are appended.
+
+`rtol` is **relative**. ARPACK's numerical zero is ~1e-7 of a mode's magnitude, not machine
+epsilon, so an absolute threshold reads a real mode as complex and then demands a conjugate
+that does not exist.
+
+`hopf_index` is carried through unchanged — the closure only appends — and
+`conjugate_index` is recomputed afterwards, so it now names the true partner.
+"""
+function close_under_conjugation(eig; rtol::Real = 1e-4)
+	λ = collect(ComplexF64, eig.eigenvalues)
+	Φ = Matrix{ComplexF64}(eig.right_modes)
+	for k in eachindex(eig.eigenvalues)
+		abs(imag(λ[k])) <= rtol * abs(λ[k]) && continue
+		any(l -> abs(l - conj(λ[k])) <= rtol * abs(λ[k]), λ) && continue
+		push!(λ, conj(λ[k]))
+		Φ = hcat(Φ, conj.(eig.right_modes[:, k]))
+	end
+	i_hopf = eig.hopf_index
+	i_conj = argmin(abs.(λ .- conj(λ[i_hopf])))
+	return (; eigenvalues = λ, right_modes = Φ,
 		hopf_index = i_hopf, conjugate_index = i_conj)
 end
 

@@ -62,7 +62,7 @@ export assemble_linear_operators, check_linearisation, compute_pressure_lift_wei
 export FluidConvection, make_param_coupling, make_base_forcing, assemble_K_visc
 export velocity_dof_mask, assemble_velocity_mass_full, domain_area,
 	prepare_energy_gram, write_energy_gram
-export solve_hopf_eigenproblem, AbstractModeNormalisation,
+export solve_hopf_eigenproblem, close_under_conjugation, AbstractModeNormalisation,
 	SymmetricBiorthogonal, LeftBiorthogonal, NoNormalisation
 # Exported because MODE SELECTION belongs to the driver, not to this module, and choosing
 # which modes can carry a master coordinate requires their bilinear pairing α = ψᵀB₁φ.

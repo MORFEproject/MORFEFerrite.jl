@@ -38,14 +38,21 @@ built with `full_conjugate_permutation`.
 the master set is not a plain sequence of adjacent conjugate pairs — for instance
 when real (self-conjugate) modes have been included alongside a Hopf pair.
 
-`n_monomials` sizes `FluidConvection`'s batched-column cache. It is a cache
+`n_monomials` sizes `FluidConvection`'s batched-column buffer. It is a buffer
 capacity, not a reduction concept: `build_model` builds no `MultiindexSet` and no
-`ResonanceSet`.
+`ResonanceSet`. The buffer is allocated `(n_monomials, n_qp)` and indexed directly, so
+the value must be **at least** the monomial count the reduction will use.
+
+`expansion_order` is the convenient spelling of the same thing, matching
+`StructuralSVK`'s `build_model`: give the total-degree truncation and the count for the
+`ROM + 1` reduced variables is derived here. Pass exactly one of the two — passing
+neither would silently size the buffer for a single column.
 """
 function build_model(m::AssembledFluidModel, eig;
 	master::AbstractVector{Int},
 	outer::AbstractVector{Int} = Int[],
-	n_monomials::Int = 1,
+	n_monomials::Union{Nothing, Int} = nothing,
+	expansion_order::Union{Nothing, Int} = nothing,
 	scale::Real = 1.0,
 	normalisation::AbstractModeNormalisation = SymmetricBiorthogonal(),
 	conjugate_permutation = nothing,
@@ -62,12 +69,22 @@ function build_model(m::AssembledFluidModel, eig;
 
 	ROM = length(master)
 
+	# Exactly one of the two, checked rather than defaulted: `n_monomials = 1` would be a
+	# valid buffer size and an out-of-bounds write on the first degree-2 monomial.
+	count(!isnothing, (n_monomials, expansion_order)) == 1 || throw(ArgumentError(
+		"pass exactly one of `n_monomials` (the monomial count) or `expansion_order` " *
+		"(the total-degree truncation it is derived from); got n_monomials = " *
+		"$n_monomials, expansion_order = $expansion_order"))
+	# The reduced variables are the ROM master coordinates plus the single frozen η′.
+	n_cols = expansion_order === nothing ? n_monomials :
+			 length(all_multiindices_up_to(ROM + 1, expansion_order; min_degree = 1))
+
 	# ── The model: convection, the Reynolds coupling, the base-flow forcing ──
-	convection = FluidConvection(m.fom; max_unique_cols = n_monomials)
+	convection = FluidConvection(m.fom; max_unique_cols = n_cols)
 	g₁ = make_param_coupling(m.K_visc)
 	h₀ = make_base_forcing(m.h₀_vec)
 	ext_sys = ExternalSystem((0.0 + 0.0im,))       # η̇′ = 0 — a frozen parameter
-	model = NthOrderModel((m.B₀, m.B₁), (convection, g₁, h₀), ext_sys)
+	model = NthOrderModel(m.B, (convection, g₁, h₀), ext_sys)
 
 	# ── Spectral data. ORD = 1 ⇒ physical slices only, no companion blocks. ──
 	# The outer eigenvalues are carried so off-manifold resonance can be detected
@@ -98,7 +115,7 @@ function build_model(m::AssembledFluidModel, eig;
 	for r in 1:ROM
 		σ_master[r] < r && continue                 # already filled by its partner
 		k = master[r]
-		φ, ψ, α = left_eigenvector(-m.B₀, m.B₁, eig.eigenvalues[k], eig.right_modes[:, k];
+		φ, ψ, α = left_eigenvector(-m.B[1], m.B[2], eig.eigenvalues[k], eig.right_modes[:, k];
 			normalisation = normalisation, scale = scale)
 		if σ_master[r] == r
 			φ, ψ = _realify_self_conjugate(φ, ψ, r, eig.eigenvalues[k])

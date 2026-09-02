@@ -37,7 +37,16 @@ using Test
         include("FluidNavierStokes/test_boundary_conditions.jl")
         include("FluidNavierStokes/test_conjugate_pairing.jl")
         include("FluidNavierStokes/test_resummation.jl")
-        include("FluidNavierStokes/test_joukowski_profile.jl")
+        joukowski_sources = (
+            joinpath(@__DIR__, "..", "examples", "11_parametric_karman_profile", "geometry.jl"),
+            joinpath(@__DIR__, "..", "examples", "11_parametric_karman_profile", "mode_tracking.jl"),
+        )
+        if all(isfile, joukowski_sources)
+            include("FluidNavierStokes/test_joukowski_profile.jl")
+        else
+            @info "Skipping Joukowski example tests: example sources are not present"
+            @test_skip all(isfile, joukowski_sources)
+        end
         include("FluidNavierStokes/test_fluid_pullback.jl")
     end
 end

@@ -24,6 +24,10 @@ using MORFE
 # Shared Ferrite backend layer (mesh IO, Paraview/VTK export stubs).
 include("common/Common.jl")
 using .Common
+# MORFE releases predating the MeshIO migration export these names too. Import
+# the new owners explicitly so the companion can land before the core removal.
+using .Common: abaqus_to_gmsh, abaqus_to_gmsh_linear,
+               comsol_to_gmsh, comsol_to_gmsh_linear, gmsh_to_comsol
 
 # Physics-blind parametric coordinate transforms. Included BEFORE the physics
 # modules: it defines the kernel interface they implement.

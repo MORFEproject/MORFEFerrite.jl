@@ -10,21 +10,11 @@
 #   abaqus_to_gmsh_linear – quadratic mesh downgraded to linear
 # -------------------------------------------------------------------
 
-import Pkg
-Pkg.activate(@__DIR__)
-if !haskey(Pkg.project().dependencies, "Gmsh")
-    Pkg.add("Gmsh")
-end
-Pkg.instantiate()
-
 using Printf
-
-include(joinpath(@__DIR__, "../../../ext/FEMUtility/AbaqusToGmsh.jl"))
-using .AbaqusToGmsh
 using Gmsh
+using MORFEFerrite: abaqus_to_gmsh, abaqus_to_gmsh_linear
 
-const OUTDIR = joinpath(@__DIR__, "output")
-mkpath(OUTDIR)
+const OUTDIR = mktempdir(; prefix = "morfeferrite-abaqus-")
 
 # ===================================================================
 # 1.  Structured mesh generators

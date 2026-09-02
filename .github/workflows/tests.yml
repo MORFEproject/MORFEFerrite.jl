@@ -1,0 +1,64 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 1'
+
+jobs:
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version: ['1.10', '1.11', '1']
+    name: Julia ${{ matrix.julia-version }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - uses: julia-actions/cache@v2
+      - name: Install dependencies
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Run tests without coverage
+        if: matrix.julia-version != '1'
+        run: julia --project=. -e 'using Pkg; Pkg.test()'
+      - name: Run tests with coverage on current stable
+        if: matrix.julia-version == '1'
+        run: julia --project=. -e 'using Pkg; Pkg.test(coverage = true)'
+      - name: Process coverage
+        if: matrix.julia-version == '1'
+        uses: julia-actions/julia-processcoverage@v1
+        with:
+          directories: src,ext
+      - name: Upload MORFEFerrite coverage
+        if: matrix.julia-version == '1'
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          flags: morfeferrite
+          name: MORFEFerrite
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  prerelease:
+    if: github.event_name == 'schedule'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    name: Julia prerelease (non-blocking)
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: 'pre'
+      - uses: julia-actions/cache@v2
+      - name: Install dependencies
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Run prerelease tests
+        run: julia --project=. -e 'using Pkg; Pkg.test()'

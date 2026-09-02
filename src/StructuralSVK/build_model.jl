@@ -93,7 +93,7 @@ function build_model(m::AssembledMechanicalModel;
     terms = Tuple(m.term_factory(d, n_cols) for d in m.nonlinear_degrees)
 
     # ── Spectrum of the autonomous operator (the forcing does not enter) ────
-    eig_model = NthOrderModel((m.K, m.C, m.M), terms)
+    eig_model = NthOrderModel(m.B, terms)
     t_eig = @elapsed sp = spectrum === nothing ?
                           MORFE.spectrum(m; nev = nev) : spectrum
     eigenvalues = sp.eigenvalues
@@ -137,7 +137,7 @@ function build_model(m::AssembledMechanicalModel;
                 res
             end,
             (0, 0), 1)
-        model = NthOrderModel((m.K, m.C, m.M), (terms..., force_term),
+        model = NthOrderModel(m.B, (terms..., force_term),
             ExternalSystem(Tuple(ext_eigs)))
     end
 

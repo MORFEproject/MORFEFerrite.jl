@@ -70,6 +70,9 @@ function fluid_model(meshfile::AbstractString;
 		model_fingerprint = fom.model_fingerprint,
 		fem_time_s = t_fem, steady_time_s = t_ss, ops_time_s = t_ops, kvisc_time_s = t_kv)
 
-	return AssembledFluidModel{typeof(fom), typeof(B₀), typeof(K_visc), typeof(K_visc_rect)}(
-		fom, Re₀, s₀_full, B₀, B₁, K_visc, K_visc_rect, h₀_vec, info)
+	# `(B₀, B₁)` is `B` — one field, so the operator order is stated once. `B[k + 1]` is Bₖ,
+	# matching `NthOrderModel.linear_terms`, which this tuple is handed to unchanged.
+	B = (B₀, B₁)
+	return AssembledFluidModel{typeof(fom), typeof(B), typeof(K_visc), typeof(K_visc_rect)}(
+		fom, Re₀, s₀_full, B, K_visc, K_visc_rect, h₀_vec, info)
 end
