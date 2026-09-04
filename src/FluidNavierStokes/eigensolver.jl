@@ -80,10 +80,12 @@ _normalise_pair(::NoNormalisation, φ, ψ, α) = (φ, ψ)
 							scale = 1.0, tol = 0.0, maxiter = 3000,
 							ncv = nothing, close_conjugates = true,
 							conjugate_rtol = 1e-4, verbose = true)
+	solve_hopf_eigenproblem(B::Tuple; kwargs...)
 		-> (; eigenvalues, right_modes, hopf_index, conjugate_index)
 
 Compute eigenvalues of `A_lin y = λ B_mass y` by shift-invert ARPACK, close the result
-under conjugation, and point at the Hopf pair.
+under conjugation, and point at the Hopf pair. The second form takes an assembled model's
+`B = (B₀, B₁)` and applies the descriptor system's own sign; prefer it.
 
 `sigma_re` offsets the shift from the imaginary axis; `sigma_im` targets a
 frequency band. Neither affects which mode is selected — only the factorisation.
@@ -222,6 +224,26 @@ function solve_hopf_eigenproblem(
 			n_added, closed.conjugate_index)
 	end
 	return closed
+end
+
+"""
+	solve_hopf_eigenproblem(B::Tuple; kwargs...)
+
+Solve the eigenproblem of an assembled model's linear operators, `B = (B₀, B₁)` as
+[`AssembledFluidModel`](@ref) stores them.
+
+The descriptor system is `B₁ẋ + B₀x = F`, so its eigenproblem is `-B₀y = λB₁y`: the sign
+belongs to the equation, not to the caller. Spelling it out at every call site
+(`solve_hopf_eigenproblem(-case.B[1], case.B[2]; ...)`) is an easy sign to get wrong and
+gives no error when it is, only a spectrum reflected about the imaginary axis, so this
+method takes the tuple whole. Every keyword is forwarded unchanged.
+"""
+function solve_hopf_eigenproblem(B::Tuple{Vararg{AbstractSparseMatrix}}; kwargs...)
+	length(B) == 2 || throw(ArgumentError(
+		"solve_hopf_eigenproblem expects the two linear operators (B₀, B₁) of a " *
+		"first-order model; got $(length(B)). Pass the two matrices positionally for " *
+		"anything else."))
+	return solve_hopf_eigenproblem(-B[1], B[2]; kwargs...)
 end
 
 """

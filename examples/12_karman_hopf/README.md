@@ -7,24 +7,33 @@ Taylor-Hood model into a single complex Stuart–Landau equation. The Reynolds n
 rides along as a parametric coordinate, so one run at the expansion point describes
 the whole bifurcation neighbourhood.
 
-The example is intentionally limited to the public, physics-independent API:
+The example is intentionally limited to the public API:
 
 ```julia
 order = 3 # Change to 9 for the reference calculation.
 case = NSE.fluid_model("cylinder_flow.msh"; Re = 49.03)
-spectrum = NSE.solve_hopf_eigenproblem(-case.B[1], case.B[2]; ...)
+spectrum = NSE.solve_hopf_eigenproblem(case.B; ...)
 (; model, spectral, meta) = build_model(case, spectrum;
     master = master, outer = outer, expansion_order = order, scale = 1e-2)
 W, R = parametrise(model, spectral, order;
     resonance = ResonanceConfig(style = :complex_normal_form, tol_relative = 0.1,
         outer_targets = true))
+branch = normal_form_branch(R; parameter = 1, sheet = :primary, ...)
+l_free, L0 = NSE.lift_functional(case)          # the one fluid-specific observable
+L_coeffs, mset_L = NSE.lift_polynomial(W, l_free)
 MORFE.save_rom(results_dir, W, R) # optional
 ```
 
 There is no example-specific mesh generation, assembly, eigensolver, cohomological
-solver, ROM wrapper, convergence diagnostic, or branch continuation. For the
-outer-mode promotion study (mode promotion, near-resonance tables, fold analysis,
-limit-cycle branches and the DNS reference) see
+solver, ROM wrapper or convergence diagnostic. The limit-cycle branch is MORFE's own
+`normal_form_branch`, which needs nothing but `R`: with a single conjugate pair in
+complex normal form the substitution `z₁ = ρ·exp(iθ)` clears the phase from the first
+row, leaving `ρ̇ = Re R₁(ρ, ρ, η′)` and `Ω = Im R₁(ρ, ρ, η′)/ρ`, and at fixed `ρ` that
+first equation is a polynomial in `η′` solved by companion matrix. Only the lift is
+fluid-specific.
+
+For the outer-mode promotion study (mode promotion, near-resonance tables, fold
+analysis, Padé-resummed branches and the DNS reference) see
 [`05_karman_vortex_street/`](../05_karman_vortex_street/).
 
 ## Run
@@ -38,7 +47,9 @@ julia --project=examples/12_karman_hopf -e \
 
 This uses the MORFEFerrite source in the current checkout and downloads the
 registered MORFE release. The generated `Manifest.toml` stays local and is not
-committed, so it contains no machine-specific paths in the repository.
+committed, so it contains no machine-specific paths in the repository. CairoMakie
+comes with it: the notebook plots the branch itself, since MORFE returns data and
+draws nothing.
 
 Open and execute [`karman_hopf.ipynb`](karman_hopf.ipynb). Its committed outputs use
 order 3 so that the demonstration remains quick; the mesh is committed too, so
@@ -67,8 +78,18 @@ results/
     W.jls
     R.jls
     R_coefficients.csv
+    branch.csv
   figures/
 ```
+
+`branch.csv` is one row per branch point (`order,eta,Re,rho,omega,St,max_abs_lift`), in
+amplitude order because orders 5 and 9 fold. Its order-9 form is committed in the MORFE
+repository as `website/tutorials/assets/karman/branch.v1.csv`, which is what the tutorial
+page plots.
+
+`sheet = :primary` is what keeps that file single-valued. `normal_form_branch` returns every
+real root in the window, and from order 9 the `η′`-polynomial has a second one at large
+amplitude; `:primary` follows the sheet born at the Hopf point and stops where it ends.
 
 [`reference_data/PROVENANCE.md`](reference_data/PROVENANCE.md) records how the
 reference was produced.
