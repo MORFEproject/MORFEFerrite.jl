@@ -42,12 +42,13 @@ conjugate manifold.
 Evaluating the resulting polynomial at `(z, z̄, η′)` reproduces the perturbation
 lift without touching a FOM-sized vector, which is what lets the Python
 post-processing work from CSV alone.
+
+The projection itself is `MORFE.observable_polynomial`; this wrapper only names it
+for the flow and keeps the `(coefficients, mset)` pair the exporters here expect.
 """
 function lift_polynomial(W, l_free::AbstractVector)
-	C = MORFE.ParametrisationMethod.coefficients(W)     # (FOM, ORD, L); ORD = 1 here
-	W1 = @view(C[:, 1, :])                              # (FOM, L)
-	L_coeffs = vec(transpose(W1) * l_free)              # (L,)
-	return L_coeffs, MORFE.ParametrisationMethod.multiindex_set(W)
+	P = MORFE.observable_polynomial(W, l_free)
+	return MORFE.Polynomials.coefficients(P), MORFE.Polynomials.multiindex_set(P)
 end
 
 

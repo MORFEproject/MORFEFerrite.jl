@@ -59,7 +59,7 @@ lives in the MORFE repository next to the chart generator:
 cp results/data/branch.csv \
    ../../../MORFE_jl/website/tutorials/assets/karman/branch.v1.csv
 cd ../../../MORFE_jl/website/tutorials/assets/karman
-python3 generate_charts.py      # lift_vs_Re.html, strouhal_vs_Re.html
+python3 generate_charts.py      # branch_vs_Re.html, the lift and Strouhal panels
 python3 generate_cycles3d.py    # cycles_3d.html, the cycles in three dimensions
 python3 sync_code_blocks.py     # karman.html's code blocks, from this notebook
 ```

@@ -94,7 +94,7 @@ include("parametric_model.jl")
 export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
        RayleighDamping, HarmonicForcing,
        AssembledMechanicalModel, RayleighEigensolver,
-       mechanical_model, spectrum, eigenfrequencies, print_mode_table,
+       mechanical_model, spectrum, eigenfrequencies, print_mode_table, probe_dof,
        resonances, print_resonances,
        svk_nonlinearity, svk_assemble_KM!,
        SVKPullbackKernel, parametric_model, base_operators

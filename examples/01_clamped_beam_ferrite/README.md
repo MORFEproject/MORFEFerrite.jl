@@ -1,20 +1,32 @@
 # 01 — Clamped beam
 
 This notebook computes an invariant-manifold ROM for a conservative,
-clamped–clamped St. Venant–Kirchhoff beam. The quadratic Ferrite mesh has
-approximately 5,000 free degrees of freedom.
+clamped–clamped St. Venant–Kirchhoff beam and reads its **backbone curve** off
+the reduced dynamics. The quadratic Ferrite mesh has approximately 5,000 free
+degrees of freedom.
 
 The example is intentionally limited to the public, physics-independent API:
 
 ```julia
-order = 3 # Change to 9 for the reference calculation.
+order = 9
 case = SVK.mechanical_model("clamped_clamped_beam.msh"; ...)
 (; model, spectral, meta) = build_model(case;
     master = [1], expansion_order = order)
 W, R = parametrise(model, spectral, order;
     resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
-MORFE.save_rom(results_dir, W, R) # optional
+
+u = observable_polynomial(W, SVK.probe_dof(case, 289, 2))
+b = normal_form_branch(R; amplitudes = range(0, 85; length = 341))
+a = cycle_amplitude.(Ref(u), b.amplitude)   # physical amplitude at the probe
+
+MORFE.save_rom(results_dir, W, R; drop_below = 0.0)
 ```
+
+The solve is graded, so orders 3, 5 and 7 come from truncating this one order-9
+result with `restrict_ReducedDynamics_to_degree` and
+`restrict_polynomial_to_degree`; they are not separate runs. The four curves on
+the [tutorial page](https://morfeproject.github.io/tutorials/structural_svk.html)
+are exactly that.
 
 There is no example-specific assembly, eigensolver, cohomological solver, ROM
 wrapper, or equation printer. Backend information remains available separately
@@ -33,26 +45,26 @@ This uses the MORFEFerrite source in the current checkout and downloads the
 registered MORFE release. The generated `Manifest.toml` stays local and is not
 committed, so it contains no machine-specific paths in the repository.
 
-Open and execute [`clamped_beam.ipynb`](clamped_beam.ipynb). Its committed
-outputs use order 3 so that the demonstration remains quick. The string
-`dirichlet = "Dirichlet"` selects the facet group named `Dirichlet` in the Gmsh
-mesh and fixes all displacement components on those facets, producing the two
-clamped ends.
+Open and execute [`clamped_beam.ipynb`](clamped_beam.ipynb). It ships at
+`order = 9`, the conservative reference: about 35 s of solve, and under a minute
+end to end. The string `dirichlet = "Dirichlet"` selects the facet group named
+`Dirichlet` in the Gmsh mesh and fixes all displacement components on those
+facets, producing the two clamped ends.
 
 From a shell:
 
 ```bash
 cd examples/01_clamped_beam_ferrite
-jupyter nbconvert --execute --to notebook --inplace clamped_beam.ipynb
+python3 -m nbconvert --execute --to notebook --inplace clamped_beam.ipynb
 MORFE_FAST=1 julia --project=. validate.jl
 ```
 
-Change `order = 3` to `order = 9` in the notebook to reproduce the conservative
-reference. Order 3 is an exact graded truncation of order 9, so `validate.jl`
-compares either result on their shared monomials against
-`reference_data/R_coefficients_ref.csv`.
+`validate.jl` compares the fresh `R` against
+`reference_data/R_coefficients_ref.csv` row by row, and the backbone against the
+committed probe row of `W` through `cycle_amplitude`, which is invariant to the
+eigenvector gauge.
 
-The optional save cell creates:
+The save cell creates:
 
 ```text
 results/
@@ -61,6 +73,8 @@ results/
     W.jls
     R.jls
     R_coefficients.csv
+    backbone.csv                # ρ, Ω and probe amplitude at orders 3, 5, 7, 9
+    W_probe_coefficients.csv    # the W row the backbone amplitude comes from
   figures/
 ```
 

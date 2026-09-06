@@ -40,6 +40,27 @@ function eigenfrequencies(m::AssembledMechanicalModel; kwargs...)
 end
 
 """
+	probe_dof(m::AssembledMechanicalModel, node, direction) -> Int
+
+Free-DOF index of `direction` (1 = x, 2 = y, 3 = z) at mesh `node`: the row of `K`, `M` and
+of the parametrisation `W` that carries that node's displacement.
+
+This is the bridge between a physical quantity named the way a person names it ("the
+transverse displacement at mid-span") and the integer `MORFE.observable_polynomial` wants:
+
+```julia
+u = observable_polynomial(W, SVK.probe_dof(case, 289, 2))
+```
+
+Throws if the node is constrained, since a constrained DOF has no row. Wraps
+[`Common.free_dofs_at_nodes`](@ref) for the single-node case.
+"""
+function probe_dof(m::AssembledMechanicalModel, node::Integer, direction::Integer)
+    return only(Common.free_dofs_at_nodes(m.info.dh, m.info.free_to_local,
+        [Int(node)], [Int(direction)]))
+end
+
+"""
 	print_mode_table(eigenvalues; master = Int[], io = stdout)
 
 Tabulate adjacent conjugate pairs in `eigenvalues`, ignoring an unmatched final
