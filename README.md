@@ -50,21 +50,23 @@ W, R = parametrise(model, spectral, 7;
 
 ## Examples
 
-Self-contained, runnable examples live under [`examples/`](examples/). Example
-01 resolves MORFE from the registry and uses MORFEFerrite from the current
-checkout; its README contains the one-time environment setup command. Some of
-the other examples still use the older sibling-checkout development workflow.
+Runnable examples live in their own repository,
+[MORFEExamples](https://github.com/MORFEproject/MORFEExamples). It carries one shared
+Julia environment and one Jupyter kernel for every example, so `julia setup.jl` there is
+the only setup step. Two of its examples use this package:
 
-| Folder | Model |
-| ------ | ----- |
-| [`01_clamped_beam_ferrite/`](examples/01_clamped_beam_ferrite/) | Clamped-clamped SVK beam — minimal notebook using the common MORFE API |
-| [`03_arch_comsol_wedge/`](examples/03_arch_comsol_wedge/) | Polysilicon arch, COMSOL P18 wedge mesh |
-| [`04_parametric_clamped_beam/`](examples/04_parametric_clamped_beam/) | Two-parameter ROM (axial stretch + bending-mode arch) |
-| [`05_karman_vortex_street/`](examples/05_karman_vortex_street/) | Kármán vortex street — outer-mode promotion study, diagnostics and DNS reference |
-| [`07_parametric_arch/`](examples/07_parametric_arch/) | Single-parameter sinusoidal arch |
-| [`08_mems_micromirror/`](examples/08_mems_micromirror/) | MEMS scanning micromirror from CAD |
-| [`12_karman_hopf/`](examples/12_karman_hopf/) | Kármán vortex street — Hopf bifurcation to a Stuart-Landau ROM, minimal notebook using the common MORFE API |
-| [`mesh_import/`](examples/mesh_import/) | COMSOL/Abaqus/Gmsh conversion examples and reusable source fixtures |
+| Example | Model |
+| ------- | ----- |
+| [`from_a_mesh_to_a_rom/`](https://github.com/MORFEproject/MORFEExamples/tree/main/from_a_mesh_to_a_rom) | Clamped-clamped SVK beam, and the backbone curve read off its reduced dynamics |
+| [`karman_vortex_street/`](https://github.com/MORFEproject/MORFEExamples/tree/main/karman_vortex_street) | Kármán vortex street: Hopf bifurcation to a Stuart-Landau ROM |
+
+Each is documented as a tutorial on the
+[MORFE website](https://morfeproject.github.io/tutorials/).
+
+Research working copies of the other cases (parametric arch, MEMS micromirror, turbine
+blade, the outer-mode promotion study) stay in this checkout under `examples/` but are
+not tracked: they carry meshes, result archives and environments a package clone has no
+use for. Tag `examples-before-untrack` is the last commit that tracked them.
 
 ## Tests
 
@@ -72,14 +74,16 @@ the other examples still use the older sibling-checkout development workflow.
 using Pkg; Pkg.test("MORFEFerrite")
 ```
 
-Example 01 validates both its committed order-3 output and an order-9 run
-against the conservative order-9 reference:
+The suite is self-contained: mesh-conversion fixtures live in `test/fixtures/mesh/`, so
+it does not read from `examples/`.
+
+The clamped beam validates an order-9 run against its conservative reference. From a
+MORFEExamples checkout:
 
 ```bash
-MORFE_ORDER=9 jupyter nbconvert --execute --to notebook --inplace \
-  examples/01_clamped_beam_ferrite/clamped_beam.ipynb
-julia --project=examples/01_clamped_beam_ferrite \
-  examples/01_clamped_beam_ferrite/validate.jl
+cd from_a_mesh_to_a_rom
+python3 -m nbconvert --execute --to notebook --inplace from_a_mesh_to_a_rom.ipynb
+MORFE_FAST=1 julia validate.jl
 ```
 
 ## License

@@ -2,7 +2,9 @@ using Ferrite
 using Gmsh
 using MORFEFerrite
 
-const _mesh_examples = normpath(joinpath(@__DIR__, "..", "..", "examples", "mesh_import"))
+# Mesh fixtures live under test/, not in an example folder: the examples themselves
+# are developed in the MORFEExamples repository and are not part of this checkout.
+const _mesh_examples = normpath(joinpath(@__DIR__, "..", "fixtures", "mesh"))
 
 function _with_gmsh(f::Function, path::AbstractString)
     gmsh.initialize()
@@ -168,8 +170,7 @@ end
         @test t10_roundtrip.connectivity == t10.connectivity
 
         # The production arch contains every legacy surface/prism permutation.
-        arch = normpath(joinpath(
-            @__DIR__, "..", "..", "examples", "03_arch_comsol_wedge", "arch_2_force.mphtxt"))
+        arch = joinpath(_mesh_examples, "arch_2_force.mphtxt")
         arch_out = joinpath(directory, "arch.msh")
         MORFEFerrite.comsol_to_gmsh(arch, arch_out)
         @test !isempty(_element_data(arch_out, 9).connectivity)   # T6
