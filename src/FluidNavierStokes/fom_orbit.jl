@@ -51,48 +51,7 @@ function eval_perturbation_convection!(
     s_free::Vector{Float64},
     fom,
 )
-    fill!(accum, 0.0)
-
-    n_dpc = ndofs_per_cell(fom.dh)
-    n_vel = fom.n_vel_dofs_per_cell
-
-    Fe = zeros(Float64, n_dpc)
-    u_e = zeros(Float64, n_vel)
-
-    for element in CellIterator(fom.dh)
-        reinit!(fom.cv_vel, element)
-        dofs = celldofs(element)
-        vel_dofs = dofs[fom.dof_range_u]   # global velocity DOF indices for this cell
-
-        # Extract velocity values from the free-DOF state vector
-        fill!(u_e, 0.0)
-        for (i, d) in enumerate(vel_dofs)
-            li = get(fom.free_to_local_dpim, d, 0)
-            li != 0 && (u_e[i] = s_free[li])
-        end
-
-        fill!(Fe, 0.0)
-        for q in 1:getnquadpoints(fom.cv_vel)
-            dΩ = getdetJdV(fom.cv_vel, q)
-            u_q = function_value(fom.cv_vel, q, u_e)   # Vec{2,Float64}
-            ∇u_q = function_gradient(fom.cv_vel, q, u_e)   # Tensor{2,2,Float64}
-
-            # f₂(s,s) = −(u·∇)u;  in Ferrite: (∇u_q ⋅ u_q)[i] = Σⱼ ∂_j uᵢ · uⱼ = (u·∇u)ᵢ
-            conv = -(∇u_q ⋅ u_q)   # Vec{2,Float64}
-
-            for i in 1:n_vel
-                ri = fom.dof_range_u[i]
-                φᵢ = shape_value(fom.cv_vel, q, i)   # Vec{2,Float64}
-                Fe[ri] += (φᵢ ⋅ conv) * dΩ
-            end
-        end
-
-        # Scatter element residual into free-DOF accumulator
-        for (r, d) in enumerate(dofs)
-            li = get(fom.free_to_local_dpim, d, 0)
-            li != 0 && (accum[li] += Fe[r])
-        end
-    end
+    _eval_perturbation_convection_pair!(accum, s_free, s_free, fom)
     return nothing
 end
 

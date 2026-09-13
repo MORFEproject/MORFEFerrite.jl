@@ -8,6 +8,59 @@ using ..ParametricGeometry: GeometryParameterBasis, PullbackCache,
 using MORFE: MultilinearMap, NthOrderModel, ExternalSystem, SpectralData,
 	full_conjugate_permutation
 
+# Increment this whenever the numerical coefficient content of the fluid
+# pullback changes.  Example-level checkpoints include it in their problem
+# fingerprint, so a corrected parametric FOM cannot silently reuse stale ROM
+# coefficients.
+const PARAMETRIC_FLUID_FORMULATION_VERSION = 3
+
+"""
+	_enforce_affine_2d_fluid_structure!(cache)
+
+Validate and enforce the exact polynomial degrees of the one-parameter,
+two-dimensional affine fluid map.  For `F(mu) = F0 + mu*G`, `det(F)` is
+quadratic and `adj(F)` is affine.  The generic recurrence used to construct a
+`PullbackCache` can leave roundoff-sized coefficients above those degrees;
+those values must not be interpreted as physical convection maps merely
+because they are bitwise nonzero.
+
+This is a narrowly bounded roundoff cleanup. When all coefficients above the
+affine analytical degree are at roundoff scale, the cache is identified as
+affine and those coefficients are replaced by exact zeros. A genuinely
+polynomial geometry provider is left unchanged; the shared fluid API continues
+to support the general maps accepted by `PullbackCache`.
+"""
+function _enforce_affine_2d_fluid_structure!(cache::PullbackCache{1,TT}) where {TT <: Tensor{2,2}}
+	basis = cache.basis
+	adj_discarded = 0.0
+	det_discarded = 0.0
+	scale = 1.0
+	for ci in eachindex(cache.adj), q in eachindex(cache.adj[ci])
+		adj = cache.adj[ci][q]
+		det = cache.det[ci][q]
+		scale = max(scale, maximum(norm, adj), maximum(abs, det))
+		for (idx, exponent) in enumerate(basis.mset.exponents)
+			degree = exponent[1]
+			degree >= 2 && (adj_discarded = max(adj_discarded, norm(adj[idx])))
+			degree >= 3 && (det_discarded = max(det_discarded, abs(det[idx])))
+		end
+	end
+	tolerance = 512 * eps(Float64) * scale
+	applied = adj_discarded <= tolerance && det_discarded <= tolerance
+	applied || return (; applied, adj_discarded, det_discarded, tolerance)
+
+	for ci in eachindex(cache.adj), q in eachindex(cache.adj[ci])
+		adj = cache.adj[ci][q]
+		det = cache.det[ci][q]
+		for (idx, exponent) in enumerate(basis.mset.exponents)
+			degree = exponent[1]
+			degree >= 2 && (adj[idx] = zero(TT))
+			degree >= 3 && (det[idx] = 0.0)
+		end
+	end
+	return (; applied, adj_discarded, det_discarded, tolerance)
+end
+
 """
 	AssembledParametricFluidModel
 
@@ -116,6 +169,7 @@ function parametric_model(case::AssembledFluidModel, geometry;
 	fom = case.fom
 	cache = PullbackCache(fom.dh, fom.cv_vel, geometry, basis;
 		inverse_determinant)
+	affine_structure = _enforce_affine_2d_fluid_structure!(cache)
 	L = nterms(basis)
 
 	Mfull = [allocate_matrix(fom.dh) for _ in 1:L]
@@ -225,14 +279,19 @@ function parametric_model(case::AssembledFluidModel, geometry;
 
 	info = (; n_free = length(free), n_terms = L, ORD = 2,
 		external_order = include_reynolds ? (:mu, :xi) : (:mu,),
-		Re₀ = case.Re₀, Δη, fom.reference_length, fom.obstacle_tag)
+		Re₀ = case.Re₀, Δη, fom.reference_length, fom.obstacle_tag,
+		parametric_fluid_formulation_version = PARAMETRIC_FLUID_FORMULATION_VERSION,
+		affine_structure)
 	return AssembledParametricFluidModel(case, basis, cache, B0, B1, V, nonconv,
 		base_conv, hgeom, hre, Δη, include_reynolds, errors, info)
 end
 
 # Closure factories are generated because MORFE determines map arity from the
 # callable signature; a vararg closure would hide the number of frozen factors.
-for mm in 0:12
+# Method-4 order 12 needs thirteen external factors for the legitimate mixed
+# viscosity term mu^12*xi, even though convection itself stops exactly at mu^1.
+const _PF_MAX_EXTERNAL_FACTORS = 13
+for mm in 0:_PF_MAX_EXTERNAL_FACTORS
 	ext = [Symbol("r$i") for i in 1:mm]
 	factor = mm == 0 ? :(one(eltype(res))) :
 		Expr(:call, :*, [:($(ext[s])[comp[$s]]) for s in 1:mm]...)
@@ -243,37 +302,38 @@ for mm in 0:12
 		(res, $(ext...)) -> (res .+= ($factor) .* h)
 	@eval _pf_linear(::Val{$mm}, comp, A, arity) =
 		(res, x, $(ext...)) -> (res .-= ($factor) .* (A * x))
+	if mm > 0
+		# Symmetric polarisation of mu^(mm-1)*xi.  MORFE enumerates one
+		# canonical external-factor tuple and applies its permutation count;
+		# consequently a mixed monomial must be represented by the symmetric
+		# multilinear form, not by assigning xi to one distinguished slot.
+		# This average is identical to mu^(mm-1)*xi when all arguments are the
+		# same physical external vector, while its canonical coefficient is
+		# exactly the unscaled Taylor coefficient.
+		mixed_terms = Any[]
+		for xi_slot in 1:mm
+			factors = Any[:($(ext[xi_slot])[2])]
+			append!(factors,
+				[:($(ext[s])[1]) for s in 1:mm if s != xi_slot])
+			push!(mixed_terms, Expr(:call, :*, factors...))
+		end
+		mixed_factor = :($(Expr(:call, :+, mixed_terms...)) / $mm)
+		@eval _pf_reynolds_vector(::Val{$mm}, h) =
+			(res, $(ext...)) -> (res .+= ($mixed_factor) .* h)
+		@eval _pf_reynolds_linear(::Val{$mm}, A) =
+			(res, x, $(ext...)) -> (res .-= ($mixed_factor) .* (A * x))
+	end
 end
 
 function _apply_convection_coefficient!(res, pm, idx, u1, u2, factor)
 	fom, cache = pm.base.fom, pm.cache
-	ue1 = zeros(eltype(u1), fom.n_vel_dofs_per_cell)
-	ue2 = similar(ue1)
-	for (ci, cell) in enumerate(CellIterator(fom.dh))
-		reinit!(fom.cv_vel, cell)
-		dofs = celldofs(cell)
-		for (a, d) in enumerate(dofs[fom.dof_range_u])
-			j = get(fom.free_to_local_dpim, d, 0)
-			ue1[a] = j == 0 ? zero(eltype(u1)) : u1[j]
-			ue2[a] = j == 0 ? zero(eltype(u2)) : u2[j]
-		end
-		for q in 1:getnquadpoints(fom.cv_vel)
-			dΩ = getdetJdV(fom.cv_vel, q)
-			A = cache.adj[ci][q][idx]
-			u1q = function_value(fom.cv_vel, q, ue1)
-			u2q = function_value(fom.cv_vel, q, ue2)
-			g1 = function_gradient(fom.cv_vel, q, ue1) ⋅ A
-			g2 = function_gradient(fom.cv_vel, q, ue2) ⋅ A
-			conv = 0.5 * (g2 ⋅ u1q + g1 ⋅ u2q)
-			for i in 1:fom.n_vel_dofs_per_cell
-				d = dofs[fom.dof_range_u[i]]
-				row = get(fom.free_to_local_dpim, d, 0)
-				row == 0 && continue
-				res[row] -= factor * (shape_value(fom.cv_vel, q, i) ⋅ conv) * dΩ
-			end
-		end
+	if u1 === u2
+		return _accumulate_fluid_convection_pair!(res, u1, u2, fom,
+			(ci, q) -> cache.adj[ci][q][idx], factor, Val(:free), Val(:free),
+			Val(true))
 	end
-	return res
+	return _accumulate_fluid_convection_pair!(res, u1, u2, fom,
+		(ci, q) -> cache.adj[ci][q][idx], factor)
 end
 
 function _external_components(k::Int; xi::Bool = false)
@@ -314,13 +374,12 @@ function build_model(pm::AssembledParametricFluidModel;
 		if pm.include_reynolds
 			A = (pm.base.fom.reference_length * pm.reynolds_scale) .* pm.viscosity[idx]
 			if _nonzero_matrix(A)
-				comp = _external_components(k; xi = true)
-				cl = Base.invokelatest(_pf_linear, Val(k + 1), comp, A, (1, 0))
+				cl = Base.invokelatest(_pf_reynolds_linear, Val(k + 1), A)
 				push!(terms, MultilinearMap(cl, (1, 0), k + 1; fully_asymmetric = false))
 			end
 			if norm(pm.h_reynolds[idx]) > 0
-				comp = _external_components(k; xi = true)
-				cl = Base.invokelatest(_pf_vector, Val(k + 1), comp, pm.h_reynolds[idx])
+				cl = Base.invokelatest(
+					_pf_reynolds_vector, Val(k + 1), pm.h_reynolds[idx])
 				push!(terms, MultilinearMap(cl, (0, 0), k + 1; fully_asymmetric = false))
 			end
 		end
@@ -340,5 +399,6 @@ function build_model(pm::AssembledParametricFluidModel;
 		ORD = 2, N_EXT = pm.include_reynolds ? 2 : 1,
 		external_order = pm.info.external_order, master_indices,
 		Re₀ = pm.base.Re₀, Δη = pm.reynolds_scale,
-		identity_errors = pm.identity_errors, n_terms = length(terms)))
+		identity_errors = pm.identity_errors, n_terms = length(terms),
+		parametric_fluid_formulation_version = PARAMETRIC_FLUID_FORMULATION_VERSION))
 end

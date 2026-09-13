@@ -29,6 +29,87 @@ using LinearAlgebra
 using SparseArrays
 using MORFE
 
+# Common element kernel used by both the ordinary moved-mesh convection action
+# and the parametric pullback.  Keeping the symmetric bilinear form here makes
+# their signs, factors of two, prescribed-DOF treatment, and complex arithmetic
+# identical by construction.
+@inline function _fluid_state_value(state, dof, free, ::Val{:free}, T)
+	return free == 0 ? zero(T) : state[free]
+end
+
+@inline _fluid_state_value(state, dof, _, ::Val{:full}, T) = T(state[dof])
+
+function _accumulate_fluid_convection_pair!(accum, u1, u2, fom,
+		adjugate_at, factor, layout1::Val = Val(:free), layout2::Val = Val(:free),
+		same_state::Val{SAME} = Val(false)) where {SAME}
+	T = promote_type(eltype(accum), eltype(u1), eltype(u2), typeof(factor))
+	ue1 = zeros(T, fom.n_vel_dofs_per_cell)
+	ue2 = SAME ? ue1 : similar(ue1)
+	Fe = zeros(T, ndofs_per_cell(fom.dh))
+	for (ci, cell) in enumerate(CellIterator(fom.dh))
+		reinit!(fom.cv_vel, cell)
+		dofs = celldofs(cell)
+		for (local_index, dof) in enumerate(dofs[fom.dof_range_u])
+			free = get(fom.free_to_local_dpim, dof, 0)
+			ue1[local_index] = _fluid_state_value(u1, dof, free, layout1, T)
+			SAME || (ue2[local_index] =
+				_fluid_state_value(u2, dof, free, layout2, T))
+		end
+		fill!(Fe, zero(T))
+		for q in 1:getnquadpoints(fom.cv_vel)
+			dOmega = getdetJdV(fom.cv_vel, q)
+			A = adjugate_at(ci, q)
+			u1q = function_value(fom.cv_vel, q, ue1)
+			grad1 = function_gradient(fom.cv_vel, q, ue1)
+			if !isnothing(A)
+				grad1 = grad1 ⋅ A
+			end
+			convection = if SAME
+				grad1 ⋅ u1q
+			else
+				u2q = function_value(fom.cv_vel, q, ue2)
+				grad2 = function_gradient(fom.cv_vel, q, ue2)
+				isnothing(A) || (grad2 = grad2 ⋅ A)
+				0.5 * (grad2 ⋅ u1q + grad1 ⋅ u2q)
+			end
+			for local_index in 1:fom.n_vel_dofs_per_cell
+				row = fom.dof_range_u[local_index]
+				Fe[row] -= factor *
+					(shape_value(fom.cv_vel, q, local_index) ⋅ convection) * dOmega
+			end
+		end
+		for (local_index, dof) in enumerate(dofs)
+			row = get(fom.free_to_local_dpim, dof, 0)
+			row == 0 || (accum[row] += Fe[local_index])
+		end
+	end
+	return accum
+end
+
+"""Internal symmetric bilinear convection action on an ordinary physical mesh."""
+function _eval_perturbation_convection_pair!(accum, u1, u2, fom)
+	fill!(accum, zero(eltype(accum)))
+	if u1 === u2
+		return _accumulate_fluid_convection_pair!(accum, u1, u2, fom,
+			(ci, q) -> nothing, one(eltype(accum)), Val(:free), Val(:free),
+			Val(true))
+	end
+	return _accumulate_fluid_convection_pair!(accum, u1, u2, fom,
+		(ci, q) -> nothing, one(eltype(accum)))
+end
+
+"""Internal bilinear convection action with independently selected state layouts."""
+function _eval_convection_pair_with_lifting!(accum, u1, u2, fom,
+		layout1::Val, layout2::Val)
+	fill!(accum, zero(eltype(accum)))
+	if u1 === u2 && layout1 === layout2
+		return _accumulate_fluid_convection_pair!(accum, u1, u2, fom,
+			(ci, q) -> nothing, one(eltype(accum)), layout1, layout2, Val(true))
+	end
+	return _accumulate_fluid_convection_pair!(accum, u1, u2, fom,
+		(ci, q) -> nothing, one(eltype(accum)), layout1, layout2)
+end
+
 # ─────────────────────────────────────────────────────────────────────────────
 # QP data type — velocity value + gradient at one quadrature point
 # ─────────────────────────────────────────────────────────────────────────────
