@@ -23,7 +23,7 @@ function _read_mesh(mesh_file::String)
             line = readline(fhand)
             if contains(line, "# number of mesh vertices")
                 nn = Meta.parse(split(line)[1]); n2c = Vector{Float64}(undef, nn * 3)
-            elseif contains(line, "# Mesh vertex coordinates")
+            elseif contains(line, "# Mesh vertex coordinates") || contains(line, "# Mesh point coordinates")
                 for i in 1:nn
                     parts = split(readline(fhand))
                     for j in 1:3; n2c[j + (i - 1) * 3] = Meta.parse(parts[j]); end
