@@ -109,11 +109,11 @@ function _read_mesh(mesh_file::String)
     open(fname, "r") do fhand
         while !eof(fhand)
             line = readline(fhand)
-            if (contains(line, "# number of mesh vertices"))
+            if (contains(line, "# number of mesh vertices") || contains(line, "# number of mesh points"))
                 line = split(line)
                 nn = Meta.parse(line[1])
                 n2c = Vector{Float64}(undef, nn * dim)
-            elseif (contains(line, "# Mesh vertex coordinates")) || contains(line, "# Mesh point coordinates")
+            elseif (contains(line, "# Mesh vertex coordinates") || contains(line, "# Mesh point coordinates"))
                 for i in 1:(nn)
                     line = split(readline(fhand))
                     for j in 1:dim
