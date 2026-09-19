@@ -133,7 +133,7 @@ quadratic and cubic forms, `assemble_KM!`, and an `AbstractStress` layer coverin
 isotropic Lamé and full anisotropic Voigt); the material/damping/forcing types
 (`SVKMaterial`, `AnisotropicMaterial`, `CubicCrystal`, `RayleighDamping`,
 `HarmonicForcing`); `mechanical_model` as the mesh→case entry point;
-`RayleighEigensolver`; `build_model`, including the harmonic-forcing external system and
+`build_model`, including the harmonic-forcing external system and
 the spectrum-wide conjugate involution; and inspection helpers (`spectrum`,
 `eigenfrequencies`, `print_mode_table`, `resonances`, `print_resonances`).
 

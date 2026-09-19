@@ -72,8 +72,8 @@ function _reference_rom(master::Vector{Int}, order::Int, nev::Int)
     )
     model = NthOrderModel((K, C, M), terms)
 
-    eigenproblem = spectrum(model,
-        solver = SVKm.RayleighEigensolver(nev, SVKm.RayleighDamping(α = _sα, β = _sβ)),
+    # The eigensolver SVKm.spectrum uses by default.
+    eigenproblem = spectrum(K, M, StructureModalDampingEigensolver(nev, _sα, _sβ);
         sorter! = (args...) -> nothing)
     eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes,
     eigenproblem.left_eigenmodes
@@ -158,6 +158,15 @@ end
     small = SVKm.spectrum(beam; nev = 4)
     @test_throws AssertionError svk_solve(beam; master = [8], order = 2,
         eigenproblem = small)
+end
+
+@testset "default eigensolver" begin
+    beam = _sel_model()
+
+    # The default is the modal-damping solver, built from the model's own damping.
+    sp = SVKm.spectrum(beam; nev = 6)
+    @test sp.solver isa StructureModalDampingEigensolver
+    @test (sp.solver.α, sp.solver.β) == (_sα, _sβ)
 end
 
 @testset "master argument validation" begin

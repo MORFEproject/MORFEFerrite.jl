@@ -3,17 +3,26 @@
 		-> Spectrum
 
 Solve the assembled model's eigenproblem. `nev` requests physical modes; the
-default `RayleighEigensolver` returns `2nev` eigenvalues and eigenmodes in adjacent
-conjugate pairs. A supplied `eigensolver` is used as-is. In particular, callers
-supplying a different modal-damping solver are responsible for making its damping
-consistent with `m.C`.
+result holds `2nev` eigenvalues and eigenmodes in adjacent conjugate pairs.
+
+The default is `StructureModalDampingEigensolver` built from the model's own Rayleigh
+coefficients `m.damping`. It solves the undamped problem `K ϕ = ω² M ϕ` once by
+shift-invert, mass-normalises `ϕ`, and builds the damped eigenvalues and the left
+eigenvector blocks in closed form, which Rayleigh damping makes possible. It never
+forms the first-order `2n × 2n` pencil, so it stays fast on large meshes.
+
+A supplied `eigensolver` is used as-is. In particular, callers supplying a different
+modal-damping solver are responsible for making its damping consistent with `m.C`.
 
 Pass the returned `MORFE.Spectrum` to `build_model` as `spectrum = ...` to inspect
 or report it without paying for a second solve—and without letting a repeated
 iterative eigensolve choose a different basis in a clustered eigenspace.
 """
 function spectrum(m::AssembledMechanicalModel; nev::Int = 10, eigensolver = nothing)
-    solver = eigensolver === nothing ? RayleighEigensolver(nev, m.damping) : eigensolver
+    solver = eigensolver === nothing ?
+             StructureModalDampingEigensolver(
+        nev, Float64(m.damping.α), Float64(m.damping.β)) :
+             eigensolver
     return solver isa StructureModalDampingEigensolver ?
            spectrum(m.K, m.M, solver; sorter! = (args...) -> nothing) :
            spectrum(

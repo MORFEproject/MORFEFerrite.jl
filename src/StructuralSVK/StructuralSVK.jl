@@ -23,11 +23,14 @@ the linear stiffness and mass matrices.
 module StructuralSVK
 
 import MORFE
-using MORFE: AbstractEigensolver, ExternalSystem, MultilinearMap, NthOrderModel,
+using MORFE: ExternalSystem, MultilinearMap, NthOrderModel,
              SpectralData, StructureModalDampingEigensolver, all_multiindices_up_to,
-             left_eigenmode_orders_from_slice, n_internal,
-             resonance_set_from_complex_normal_form_style, resonant_multiindices
+             n_internal, resonance_set_from_complex_normal_form_style,
+             resonant_multiindices
 import MORFE: spectrum
+# Arpack is not called here directly: loading it activates MORFE's Arpack
+# extension, which implements StructureModalDampingEigensolver, the default of
+# `spectrum`.
 using Ferrite, FerriteGmsh, Arpack, LinearMaps
 using LinearAlgebra, SparseArrays, Printf
 using StaticArrays
@@ -80,7 +83,6 @@ end
 function svk_assemble_KM!(K, M, dh, cv, material::Union{SVKMaterial, AnisotropicMaterial})
     assemble_KM!(K, M, dh, cv, stress_model(material), Float64(material.ρ))
 end
-include("rayleigh_solver.jl")
 include("mechanical_model.jl")
 include("build_model.jl")
 include("parametrise.jl")
@@ -93,7 +95,7 @@ include("parametric_model.jl")
 
 export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
        RayleighDamping, HarmonicForcing,
-       AssembledMechanicalModel, RayleighEigensolver,
+       AssembledMechanicalModel,
        mechanical_model, spectrum, eigenfrequencies, print_mode_table, probe_dof,
        resonances, print_resonances,
        svk_nonlinearity, svk_assemble_KM!,

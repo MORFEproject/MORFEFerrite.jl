@@ -75,8 +75,8 @@ const _order = 3
         3, dh, cv, free_to_local, n_free, λm, μm; max_unique_cols = length(mset))
     model = NthOrderModel((K, C, M), (term_quad, term_cubic))
 
-    eigenproblem = spectrum(model,
-        solver = SVK.RayleighEigensolver(10, SVK.RayleighDamping(α = _α, β = _β)),
+    # The eigensolver SVK.spectrum uses by default.
+    eigenproblem = spectrum(K, M, StructureModalDampingEigensolver(10, _α, _β);
         sorter! = (args...) -> nothing)
     eigenvalues, Y, X = eigenproblem.eigenvalues, eigenproblem.eigenmodes,
     eigenproblem.left_eigenmodes
