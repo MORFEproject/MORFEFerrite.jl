@@ -14,14 +14,18 @@ where:
 	δE = ε(δu) + sym(∇uᵀ∇δu).
 
 For isotropy, `σ(E) = λ tr(E) I + 2μE`; the anisotropic path applies its Voigt
-matrix instead. Expansion in `u` gives linear, quadratic, and cubic internal
-forces. The multilinear maps below return the negatives of the nonlinear
-internal terms, matching MORFE's `linear = nonlinear` model convention.
+matrix instead. Equivalently, with the first Piola-Kirchhoff stress
+`P = (I + ∇u) S`, `δW_int = ∫ P ⊡ ∇δu dΩ`. Expansion in `u` gives linear,
+quadratic, and cubic internal forces; the kernels below form the quadratic and
+cubic parts of `P` once per quadrature point. The multilinear maps return the
+negatives of the nonlinear internal terms, matching MORFE's
+`linear = nonlinear` model convention.
 """
 
 # ── Stress models ───────────────────────────────────────────────────────────
-# `_σ(ε, model)` maps a symmetric strain tensor to the 2nd Piola-Kirchhoff
-# stress. The isotropic model routes to the original Lamé expression unchanged.
+# `_σ(ε, model)` maps a symmetric strain tensor, real or complex, to the 2nd
+# Piola-Kirchhoff stress. The isotropic model routes to the original Lamé
+# expression unchanged.
 abstract type AbstractStress end
 
 struct IsotropicStress <: AbstractStress
@@ -61,7 +65,7 @@ end
 	s5 = D[5, 1]*e1 + D[5, 2]*e2 + D[5, 3]*e3 + D[5, 4]*e4 + D[5, 5]*e5 + D[5, 6]*e6
 	s6 = D[6, 1]*e1 + D[6, 2]*e2 + D[6, 3]*e3 + D[6, 4]*e4 + D[6, 5]*e5 + D[6, 6]*e6
 	# SymmetricTensor{2,3} takes the lower triangle column-major: (11, 21, 31, 22, 32, 33)
-	return SymmetricTensor{2, 3, Float64}((s1, s6, s5, s2, s4, s3))
+	return SymmetricTensor{2, 3}((s1, s6, s5, s2, s4, s3))
 end
 
 # -----------------------------------------------------------------------
@@ -97,11 +101,9 @@ struct FerriteGeometricNonlinearity{DEG, DH, CV, S} <: MORFE.FEMMultilinearMap{2
 	multiplicity_external::Int
 	deg::Int
 	fully_asymmetric::Union{Nothing, Bool}
-	∇W_qp::Matrix{Tensor{2, 3, ComplexF64}}
+	∇W_qp::Matrix{Tensor{2, 3, ComplexF64, 9}}   # concrete: Tensor{2, 3, ComplexF64} boxes
 	Fe::Vector{ComplexF64}
 	u_e::Vector{ComplexF64}
-	u_e_re::Vector{Float64}
-	u_e_im::Vector{Float64}
 end
 
 """
@@ -137,14 +139,12 @@ function FerriteGeometricNonlinearity{DEG}(
 	fully_asymmetric::Union{Nothing, Bool} = false) where {DEG, DH, CV, S <: AbstractStress}
 	n_qp = getnquadpoints(cv)
 	n_dofs = ndofs_per_cell(dh)
-	∇W_qp = Matrix{Tensor{2, 3, ComplexF64}}(undef, max_unique_cols, n_qp)
+	∇W_qp = Matrix{Tensor{2, 3, ComplexF64, 9}}(undef, max_unique_cols, n_qp)
 	Fe = Vector{ComplexF64}(undef, n_dofs)
 	u_e = Vector{ComplexF64}(undef, n_dofs)
-	u_e_re = zeros(Float64, n_dofs)
-	u_e_im = zeros(Float64, n_dofs)
 	return FerriteGeometricNonlinearity{DEG, DH, CV, S}(
 		dh, cv, free_to_local, n_free, stress,
-		(DEG, 0), 0, DEG, fully_asymmetric, ∇W_qp, Fe, u_e, u_e_re, u_e_im)
+		(DEG, 0), 0, DEG, fully_asymmetric, ∇W_qp, Fe, u_e)
 end
 
 # -----------------------------------------------------------------------
@@ -190,73 +190,31 @@ end
 @inline _E_nl(∇u1, ∇u2) = symmetric(
 	Tensor{2, 3}(0.25 * (transpose(∇u1) ⋅ ∇u2 + transpose(∇u2) ⋅ ∇u1)))
 
-# Extract real/imaginary Float64 tensors from a ComplexF64 gradient tensor.
-# map on NTuple is compile-time-unrolled and avoids closure allocation.
-@inline _re(G::Tensor{2, 3, ComplexF64}) = Tensor{2, 3, Float64}(map(real, G.data))
-@inline _im(G::Tensor{2, 3, ComplexF64}) = Tensor{2, 3, Float64}(map(imag, G.data))
-
-# Float64-specific E_nl: drops the Tensor{2,3}(...) passthrough wrapper, which
-# can prevent full inlining of the arithmetic for non-complex inputs.
-@inline _E_nl_f64(A::Tensor{2, 3, Float64}, B::Tensor{2, 3, Float64}) =
-	symmetric(0.25 * (transpose(A) ⋅ B + transpose(B) ⋅ A))
-
 """
 	MORFE.accumulate_qp!(Fe, ∇W_args::NTuple{2}, mult, element, q, dΩ, t)
 
 Quadratic geometric nonlinearity integrand at one quadrature point:
 
-	Fe_r -= mult * [ε(φ_r) ⊡ σ(E_nl(∇u1,∇u2))
-					+ 0.5*(sym(∇u1'⋅∇φ_r) ⊡ σ(ε(∇u2))
-							 + sym(∇u2'⋅∇φ_r) ⊡ σ(ε(∇u1)))] * dΩ
+	Fe_r -= mult * ∇φ_r ⊡ P₂(∇u1, ∇u2) * dΩ
+	P₂(∇u1, ∇u2) = σ(E_nl(∇u1, ∇u2)) + ½(∇u1 ⋅ σ(ε(∇u2)) + ∇u2 ⋅ σ(ε(∇u1)))
 
-Here `E_nl(A,B) = sym(0.25(AᵀB + BᵀA))`. The negative sign moves the nonlinear
-internal force to MORFE's right-hand side. The implementation decomposes
-`∇u1 = A+iB`, `∇u2 = C+iD` into `Float64` tensors and expands the bilinear form
-over real and imaginary parts to avoid complex tensor allocations.
+`P₂` is the polarised quadratic part of the first Piola-Kirchhoff stress `(I + ∇u) σ(E)`,
+with `E_nl(A, B) = sym(0.25(AᵀB + BᵀA))`. It equals the quadratic part of `S ⊡ δE` term by
+term, because `sym(Aᵀ∇φ) ⊡ σ = ∇φ ⊡ (A ⋅ σ)` for a symmetric `σ`. Formed once per quadrature
+point, it leaves one double contraction per test function. The gradients are complex and
+the form must stay multilinear, so nothing here conjugates: `E_nl` writes `transpose`, and
+Tensors.jl's `symmetric`, `⋅` and `⊡` do not conjugate either. The negative sign moves the
+nonlinear internal force to MORFE's right-hand side.
 """
 function MORFE.accumulate_qp!(Fe, ∇W_args::NTuple{2}, mult, _element, q, dΩ,
 	t::FerriteGeometricNonlinearity{2})
 	∇u1, ∇u2 = ∇W_args
-	A = _re(∇u1);
-	B = _im(∇u1)
-	C = _re(∇u2);
-	D = _im(∇u2)
-
-	E_nl_re = _E_nl_f64(A, C) - _E_nl_f64(B, D)
-	E_nl_im = _E_nl_f64(A, D) + _E_nl_f64(B, C)
-	σ_nl_re = _σ(E_nl_re, t.stress)
-	σ_nl_im = _σ(E_nl_im, t.stress)
-
-	ε1_re = symmetric(A);
-	ε1_im = symmetric(B)
-	ε2_re = symmetric(C);
-	ε2_im = symmetric(D)
-	σ_ε1_re = _σ(ε1_re, t.stress);
-	σ_ε1_im = _σ(ε1_im, t.stress)
-	σ_ε2_re = _σ(ε2_re, t.stress);
-	σ_ε2_im = _σ(ε2_im, t.stress)
-
-	n_dofs = ndofs_per_cell(t.dh)
+	s = t.stress
+	P = _σ(_E_nl(∇u1, ∇u2), s) +
+		0.5 * (∇u1 ⋅ _σ(symmetric(∇u2), s) + ∇u2 ⋅ _σ(symmetric(∇u1), s))
 	c = mult * dΩ
-
-	for r in 1:n_dofs
-		∂Nr = shape_gradient(t.cv, q, r)
-		δε  = symmetric(∂Nr)
-
-		cr1_re = symmetric(transpose(A) ⋅ ∂Nr)
-		cr1_im = symmetric(transpose(B) ⋅ ∂Nr)
-		cr2_re = symmetric(transpose(C) ⋅ ∂Nr)
-		cr2_im = symmetric(transpose(D) ⋅ ∂Nr)
-
-		re = δε ⊡ σ_nl_re +
-			 0.5 * (cr1_re ⊡ σ_ε2_re - cr1_im ⊡ σ_ε2_im +
-					cr2_re ⊡ σ_ε1_re - cr2_im ⊡ σ_ε1_im)
-
-		im = δε ⊡ σ_nl_im +
-			 0.5 * (cr1_re ⊡ σ_ε2_im + cr1_im ⊡ σ_ε2_re +
-					cr2_re ⊡ σ_ε1_im + cr2_im ⊡ σ_ε1_re)
-
-		Fe[r] -= complex(c * re, c * im)
+	for r in 1:ndofs_per_cell(t.dh)
+		Fe[r] -= c * (shape_gradient(t.cv, q, r) ⊡ P)
 	end
 end
 
@@ -265,59 +223,22 @@ end
 
 Cubic geometric nonlinearity integrand at one quadrature point:
 
-	Fe_r -= mult/3 * Σ_{(i,j,k) cyclic} sym(∇ui'⋅∇φ_r) ⊡ σ(E_nl(∇uj,∇uk)) * dΩ
+	Fe_r -= mult * ∇φ_r ⊡ P₃(∇u1, ∇u2, ∇u3) * dΩ
+	P₃ = ⅓ Σ_{(i,j,k) cyclic} ∇ui ⋅ σ(E_nl(∇uj, ∇uk))
 
-The negative sign moves the nonlinear internal force to MORFE's right-hand side.
-The implementation decomposes all three complex gradients into `Float64` tensors
-and expands the trilinear form over real and imaginary parts to avoid complex
-tensor allocations.
+`P₃` is the polarised cubic part of the first Piola-Kirchhoff stress, formed once per
+quadrature point as in the quadratic method. The negative sign moves the nonlinear internal
+force to MORFE's right-hand side.
 """
 function MORFE.accumulate_qp!(Fe, ∇W_args::NTuple{3}, mult, _element, q, dΩ,
 	t::FerriteGeometricNonlinearity{3})
 	∇u1, ∇u2, ∇u3 = ∇W_args
-	A = _re(∇u1);
-	B = _im(∇u1)
-	C = _re(∇u2);
-	D = _im(∇u2)
-	E = _re(∇u3);
-	F = _im(∇u3)
-
-	E23_re = _E_nl_f64(C, E) - _E_nl_f64(D, F);
-	E23_im = _E_nl_f64(C, F) + _E_nl_f64(D, E)
-	E13_re = _E_nl_f64(A, E) - _E_nl_f64(B, F);
-	E13_im = _E_nl_f64(A, F) + _E_nl_f64(B, E)
-	E12_re = _E_nl_f64(A, C) - _E_nl_f64(B, D);
-	E12_im = _E_nl_f64(A, D) + _E_nl_f64(B, C)
-
-	σ23_re = _σ(E23_re, t.stress);
-	σ23_im = _σ(E23_im, t.stress)
-	σ13_re = _σ(E13_re, t.stress);
-	σ13_im = _σ(E13_im, t.stress)
-	σ12_re = _σ(E12_re, t.stress);
-	σ12_im = _σ(E12_im, t.stress)
-
-	n_dofs = ndofs_per_cell(t.dh)
-	c = mult * dΩ / 3
-
-	for r in 1:n_dofs
-		∂Nr = shape_gradient(t.cv, q, r)
-
-		cr1_re = symmetric(transpose(A) ⋅ ∂Nr)
-		cr1_im = symmetric(transpose(B) ⋅ ∂Nr)
-		cr2_re = symmetric(transpose(C) ⋅ ∂Nr)
-		cr2_im = symmetric(transpose(D) ⋅ ∂Nr)
-		cr3_re = symmetric(transpose(E) ⋅ ∂Nr)
-		cr3_im = symmetric(transpose(F) ⋅ ∂Nr)
-
-		re = cr1_re ⊡ σ23_re - cr1_im ⊡ σ23_im +
-			 cr2_re ⊡ σ13_re - cr2_im ⊡ σ13_im +
-			 cr3_re ⊡ σ12_re - cr3_im ⊡ σ12_im
-
-		im = cr1_re ⊡ σ23_im + cr1_im ⊡ σ23_re +
-			 cr2_re ⊡ σ13_im + cr2_im ⊡ σ13_re +
-			 cr3_re ⊡ σ12_im + cr3_im ⊡ σ12_re
-
-		Fe[r] -= complex(c * re, c * im)
+	s = t.stress
+	P = (∇u1 ⋅ _σ(_E_nl(∇u2, ∇u3), s) + ∇u2 ⋅ _σ(_E_nl(∇u1, ∇u3), s) +
+		 ∇u3 ⋅ _σ(_E_nl(∇u1, ∇u2), s)) / 3
+	c = mult * dΩ
+	for r in 1:ndofs_per_cell(t.dh)
+		Fe[r] -= c * (shape_gradient(t.cv, q, r) ⊡ P)
 	end
 end
 
