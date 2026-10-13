@@ -15,7 +15,7 @@ domains as first-class submodules.
 | Submodule | Provides |
 | --------- | -------- |
 | `StructuralSVK` | St. Venant-Kirchhoff model construction: `mechanical_model`, `build_model`, `SVKMaterial`, `RayleighDamping`, `HarmonicForcing`, plus the Ferrite geometric-nonlinearity backend (`svk_nonlinearity`, `svk_assemble_KM!`) |
-| `ParametricStructural` | General multi-parameter geometric ROMs: additive map `x(θ,x₀) = x₀ + Σᵢ θᵢψᵢ(x₀)` with per-parameter (multiindex-box) θ-series truncation |
+| `ParametricGeometry` | Physics-blind parametric geometry: the coordinate transform `x(θ,x₀) = Σ_α x_α(x₀) θ^α` as a multivariate θ-series with per-parameter (multiindex-box) truncation, expanding any physics' multilinear maps; `StructuralSVK` and `FluidNavierStokes` build their parametric models on it |
 | `FluidNavierStokes` | Incompressible cylinder-flow DPIM: Taylor-Hood setup, Newton base flow, linearised operators, convection `FEMMultilinearMap` |
 | `Common.MeshIO` | COMSOL/Abaqus/Gmsh conversion (`comsol_to_gmsh`, `abaqus_to_gmsh`, `gmsh_to_comsol` and linear variants) plus COMSOL-to-Ferrite loading (`load_comsol_grid`); all functions are also exported at package top level |
 | `Common` | Shared assembled-model contracts and Paraview/VTK export (`write_paraview_*`, activated by `using WriteVTK`) |
