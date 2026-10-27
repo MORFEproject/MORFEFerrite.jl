@@ -7,18 +7,19 @@ activated automatically when `WriteVTK` is loaded (`using WriteVTK`).
 module ParaviewExport
 
 export write_paraview_mesh, write_paraview_modes, write_paraview_manifold,
-	write_paraview_deformation, write_paraview_p2p1,
-	write_paraview_p2p1_phase_animation
+       write_paraview_deformation, write_paraview_p2p1,
+       write_paraview_p2p1_phase_animation
 
 const _NEED_VTK = "requires WriteVTK.jl. Load it with `using WriteVTK` to " *
-	"activate the MORFEFerriteWriteVTKExt extension."
+                  "activate the MORFEFerriteWriteVTKExt extension."
 
 """
-    write_paraview_mesh(filename, grid; dh=nothing, prescribed_dofs=nothing)
+    write_paraview_mesh(filename, grid; dof_handler=nothing, prescribed_dofs=nothing)
 
 Write the undeformed Ferrite mesh to `filename.vtu`.
 
-When `dh` and `prescribed_dofs` (= `ch.prescribed_dofs`) are supplied, the
+When `dof_handler` and `prescribed_dofs` (a `ConstraintHandler`'s `prescribed_dofs`) are
+supplied, the
 following point-data arrays are embedded so that clicking any node in Paraview
 shows its metadata:
 
@@ -57,7 +58,7 @@ edge averages). The resulting file can be opened directly in ParaView.
   cell data for provenance.
 
 The convenience method expects the fields returned by
-`FluidNavierStokes.setup_fem`. A lower-level method accepting `grid`, `dh`, and
+`FluidNavierStokes.setup_fem`. A lower-level method accepting `grid`, `dof_handler`, and
 the local velocity/pressure DOF ranges is also available.
 """
 write_paraview_p2p1(args...; kwargs...) = error("write_paraview_p2p1 $_NEED_VTK")
@@ -70,11 +71,13 @@ Write a PVD animation of the diagnostic linear field
 `state + visual_amplitude*real(exp(im*phase)*mode)`. Each VTU contains
 `total_velocity` and `total_vorticity`.
 """
-write_paraview_p2p1_phase_animation(args...; kwargs...) = error(
-	"write_paraview_p2p1_phase_animation $_NEED_VTK")
+function write_paraview_p2p1_phase_animation(args...; kwargs...)
+    error(
+        "write_paraview_p2p1_phase_animation $_NEED_VTK")
+end
 
 """
-    write_paraview_modes(outdir, grid, dh, eigenvalues, Y, free; n_modes=10, prefix="mode")
+    write_paraview_modes(outdir, grid, dof_handler, eigenvalues, Y, free; n_modes=10, prefix="mode")
 
 Write the first `n_modes` eigenmodes to `outdir/mode_kk.vtu` and collect them
 in a PVD file `outdir/modes.pvd` (one "time" frame per mode).
@@ -85,7 +88,7 @@ in a PVD file `outdir/modes.pvd` (one "time" frame per mode).
 write_paraview_modes(args...; kwargs...) = error("write_paraview_modes $_NEED_VTK")
 
 """
-    write_paraview_manifold(outdir, grid, dh, W, free; alpha_indices=nothing)
+    write_paraview_manifold(outdir, grid, dof_handler, W, free; alpha_indices=nothing)
 
 Write manifold coefficient columns of `W` to individual `.vtu` files.
 `alpha_indices` selects which monomials to export (all by default).
@@ -93,7 +96,7 @@ Write manifold coefficient columns of `W` to individual `.vtu` files.
 write_paraview_manifold(args...; kwargs...) = error("write_paraview_manifold $_NEED_VTK")
 
 """
-    write_paraview_deformation(outdir, grid, dh, W, free, r_amplitude;
+    write_paraview_deformation(outdir, grid, dof_handler, W, free, r_amplitude;
                                 theta=0.0, label="deformation")
 
 Write a single `.vtu` at the backbone point `z₁ = r_amplitude · exp(i·theta)` with
@@ -104,6 +107,8 @@ two vector point-data fields:
 
 `theta = 0` (default) gives a real displacement aligned with the eigenvector.
 """
-write_paraview_deformation(args...; kwargs...) = error("write_paraview_deformation $_NEED_VTK")
+function write_paraview_deformation(args...; kwargs...)
+    error("write_paraview_deformation $_NEED_VTK")
+end
 
 end # module ParaviewExport

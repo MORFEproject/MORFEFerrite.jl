@@ -46,22 +46,23 @@ const _order = 3
     grid2 = _test_grid()
     ip = Lagrange{RefHexahedron, 2}()^3
     qr = QuadratureRule{RefHexahedron}(3)
-    cv = CellValues(qr, ip)
-    dh = DofHandler(grid2)
-    add!(dh, :u, ip)
-    close!(dh)
-    ch = ConstraintHandler(dh)
-    add!(ch, Dirichlet(:u, getfacetset(grid2, "Dirichlet"), (x, t) -> zeros(3), [1, 2, 3]))
-    close!(ch)
-    update!(ch, 0.0)
+    cell_values = CellValues(qr, ip)
+    dof_handler = DofHandler(grid2)
+    add!(dof_handler, :u, ip)
+    close!(dof_handler)
+    constraints = ConstraintHandler(dof_handler)
+    add!(constraints, Dirichlet(:u, getfacetset(grid2, "Dirichlet"), (x, t) -> zeros(3), [
+        1, 2, 3]))
+    close!(constraints)
+    update!(constraints, 0.0)
 
     λm = (_E * _ν) / ((1 + _ν) * (1 - 2_ν))
     μm = _E / (2(1 + _ν))
-    K_full = allocate_matrix(dh)
-    M_full = allocate_matrix(dh)
-    svk_assemble_KM!(K_full, M_full, dh, cv, λm, μm, _ρ)
-    free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
-    free_to_local = Dict(d => i for (i, d) in enumerate(free))
+    K_full = allocate_matrix(dof_handler)
+    M_full = allocate_matrix(dof_handler)
+    svk_assemble_KM!(K_full, M_full, dof_handler, cell_values, λm, μm, _ρ)
+    free = sort(setdiff(1:ndofs(dof_handler), constraints.prescribed_dofs))
+    dof_to_free = Dict(d => i for (i, d) in enumerate(free))
     n_free = length(free)
     K = K_full[free, free]
     M = M_full[free, free]
@@ -69,10 +70,8 @@ const _order = 3
 
     ROM = 2
     mset = all_multiindices_up_to(ROM, _order; min_degree = 1)
-    term_quad = svk_nonlinearity(
-        2, dh, cv, free_to_local, n_free, λm, μm; max_unique_cols = length(mset))
-    term_cubic = svk_nonlinearity(
-        3, dh, cv, free_to_local, n_free, λm, μm; max_unique_cols = length(mset))
+    term_quad = svk_nonlinearity(2, dof_handler, cell_values, dof_to_free, n_free, λm, μm)
+    term_cubic = svk_nonlinearity(3, dof_handler, cell_values, dof_to_free, n_free, λm, μm)
     model = NthOrderModel((K, C, M), (term_quad, term_cubic))
 
     # The eigensolver SVK.spectrum uses by default.

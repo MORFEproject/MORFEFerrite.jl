@@ -42,8 +42,7 @@ beam = SVK.mechanical_model("beam.msh";
     damping   = SVK.RayleighDamping(α = 5.4e-3, β = 1.9e-2),
     dirichlet = "Dirichlet")
 
-(; model, spectral, meta) = build_model(beam;
-    master = [1], expansion_order = 7)
+(; model, spectral, meta) = build_model(beam; master = [1])
 W, R = parametrise(model, spectral, 7;
     resonance = ResonanceConfig(style = :complex_normal_form, tol = 0.05))
 ```

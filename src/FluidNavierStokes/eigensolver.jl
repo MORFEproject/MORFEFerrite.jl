@@ -67,8 +67,8 @@ and the caller is responsible for the biorthogonality the solve assumes.
 struct NoNormalisation <: AbstractModeNormalisation end
 
 function _normalise_pair(::SymmetricBiorthogonal, φ, ψ, α)
-	s = sqrt(α)
-	return φ ./ s, ψ ./ s
+    s = sqrt(α)
+    return φ ./ s, ψ ./ s
 end
 _normalise_pair(::LeftBiorthogonal, φ, ψ, α) = (φ, ψ ./ α)
 _normalise_pair(::NoNormalisation, φ, ψ, α) = (φ, ψ)
@@ -135,95 +135,95 @@ Returns a `NamedTuple` so the fields are named at every call site: `eigenvalues`
 `conjugate_index` locate the Hopf pair within them.
 """
 function solve_hopf_eigenproblem(
-	A_lin::AbstractSparseMatrix,
-	B_mass::AbstractSparseMatrix;
-	nev::Int,
-	sigma_re::Float64,
-	sigma_im::Float64,
-	target_freq::Union{Nothing, Float64} = nothing,
-	normalisation::AbstractModeNormalisation = SymmetricBiorthogonal(),
-	scale::Real = 1.0,
-	tol::Real = 0.0,
-	maxiter::Int = 3000,
-	ncv::Union{Nothing, Int} = nothing,
-	close_conjugates::Bool = true,
-	conjugate_rtol::Real = 1e-4,
-	verbose::Bool = true,
+        A_lin::AbstractSparseMatrix,
+        B_mass::AbstractSparseMatrix;
+        nev::Int,
+        sigma_re::Float64,
+        sigma_im::Float64,
+        target_freq::Union{Nothing, Float64} = nothing,
+        normalisation::AbstractModeNormalisation = SymmetricBiorthogonal(),
+        scale::Real = 1.0,
+        tol::Real = 0.0,
+        maxiter::Int = 3000,
+        ncv::Union{Nothing, Int} = nothing,
+        close_conjugates::Bool = true,
+        conjugate_rtol::Real = 1e-4,
+        verbose::Bool = true
 )
-	n = size(A_lin, 1)
-	0 <= tol < 1 || throw(ArgumentError("tol must satisfy 0 <= tol < 1"))
-	maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
-	nev > 0 || throw(ArgumentError("nev must be positive"))
-	nev < n || throw(ArgumentError("nev must be smaller than the matrix dimension"))
-	ncv_used = isnothing(ncv) ? min(max(nev + 30, 120), n - 1) : Int(ncv)
-	nev + 1 <= ncv_used <= n - 1 || throw(ArgumentError(
-		"ncv must satisfy nev + 1 <= ncv <= n - 1"))
-	sigma = complex(sigma_re, sigma_im)
-	verbose && println("  Shift σ = $sigma,  nev = $nev,  ncv = $ncv_used,  n = $n")
+    n = size(A_lin, 1)
+    0 <= tol < 1 || throw(ArgumentError("tol must satisfy 0 <= tol < 1"))
+    maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
+    nev > 0 || throw(ArgumentError("nev must be positive"))
+    nev < n || throw(ArgumentError("nev must be smaller than the matrix dimension"))
+    ncv_used = isnothing(ncv) ? min(max(nev + 30, 120), n - 1) : Int(ncv)
+    nev + 1 <= ncv_used <= n - 1 || throw(ArgumentError(
+        "ncv must satisfy nev + 1 <= ncv <= n - 1"))
+    sigma = complex(sigma_re, sigma_im)
+    verbose && println("  Shift σ = $sigma,  nev = $nev,  ncv = $ncv_used,  n = $n")
 
-	# ── Shift-invert factorisation ─────────────────────────────────────────────
-	Ac = complex.(A_lin)
-	Bc = complex.(B_mass)
-	F = klu(Ac - sigma * Bc)
-	LM = LinearMap{ComplexF64}(n, n; ismutating = false) do x
-		F \ (Bc * x)
-	end
-	mu, vecs, = eigs(LM; nev = nev, which = :LM, maxiter, ncv = ncv_used,
-		tol = Float64(tol))
+    # ── Shift-invert factorisation ─────────────────────────────────────────────
+    Ac = complex.(A_lin)
+    Bc = complex.(B_mass)
+    F = klu(Ac - sigma * Bc)
+    LM = LinearMap{ComplexF64}(n, n; ismutating = false) do x
+        F \ (Bc * x)
+    end
+    mu, vecs, = eigs(LM; nev = nev, which = :LM, maxiter, ncv = ncv_used,
+        tol = Float64(tol))
 
-	# Guard against zero mu (spurious pressure modes of the descriptor system).
-	tiny = eps(Float64)
-	mu_safe = map(m -> abs(m) < tiny ? complex(tiny) : m, mu)
-	vals = sigma .+ inv.(mu_safe)
+    # Guard against zero mu (spurious pressure modes of the descriptor system).
+    tiny = eps(Float64)
+    mu_safe = map(m -> abs(m) < tiny ? complex(tiny) : m, mu)
+    vals = sigma .+ inv.(mu_safe)
 
-	if verbose
-		println()
-		@printf("  %3s   %-14s  %-14s  %-12s\n", "#", "Re(λ)", "Im(λ)", "|λ|")
-		println("  " * "─"^52)
-		for (i, λ) in enumerate(vals)
-			@printf("  %3d   %+12.6f  %+12.6f  %12.6f\n", i, real(λ), imag(λ), abs(λ))
-		end
-		println()
-	end
+    if verbose
+        println()
+        @printf("  %3s   %-14s  %-14s  %-12s\n", "#", "Re(λ)", "Im(λ)", "|λ|")
+        println("  " * "─"^52)
+        for (i, λ) in enumerate(vals)
+            @printf("  %3d   %+12.6f  %+12.6f  %12.6f\n", i, real(λ), imag(λ), abs(λ))
+        end
+        println()
+    end
 
-	# ── Report the Hopf mode, but do NOT select on the caller's behalf ────────
-	# Which modes are master and which are outer is the caller's choice; this only
-	# points at the least-damped oscillatory mode, the usual one to want. The
-	# heuristic is reliable near Re_c; away from it another oscillatory mode can sit
-	# closer to the imaginary axis, so `target_freq` pins the frequency instead.
-	hopf_tol = 0.1
-	cand = findall(λ -> imag(λ) > hopf_tol, vals)
-	isempty(cand) && error("No eigenvalue with Im(λ) > $hopf_tol found; increase nev.")
-	i_hopf = target_freq === nothing ?
-			 cand[argmin(abs(real(vals[i])) for i in cand)] :
-			 cand[argmin(abs(imag(vals[i]) - target_freq) for i in cand)]
-	i_conj = argmin(abs.(vals .- conj(vals[i_hopf])))
+    # ── Report the Hopf mode, but do NOT select on the caller's behalf ────────
+    # Which modes are master and which are outer is the caller's choice; this only
+    # points at the least-damped oscillatory mode, the usual one to want. The
+    # heuristic is reliable near Re_c; away from it another oscillatory mode can sit
+    # closer to the imaginary axis, so `target_freq` pins the frequency instead.
+    hopf_tol = 0.1
+    cand = findall(λ -> imag(λ) > hopf_tol, vals)
+    isempty(cand) && error("No eigenvalue with Im(λ) > $hopf_tol found; increase nev.")
+    i_hopf = target_freq === nothing ?
+             cand[argmin(abs(real(vals[i])) for i in cand)] :
+             cand[argmin(abs(imag(vals[i]) - target_freq) for i in cand)]
+    i_conj = argmin(abs.(vals .- conj(vals[i_hopf])))
 
-	if verbose
-		@printf("  Hopf mode: index %d,  λ = %+.6f %+.6f·i  (ω_c = %.4f rad/s); conjugate at %d\n",
-			i_hopf, real(vals[i_hopf]), imag(vals[i_hopf]), imag(vals[i_hopf]), i_conj)
-		n_real = count(λ -> abs(imag(λ)) <= hopf_tol, vals)
-		@printf("  %d modes computed, %d on/near the real axis (|Im λ| ≤ %.2g)\n",
-			length(vals), n_real, hopf_tol)
-	end
+    if verbose
+        @printf("  Hopf mode: index %d,  λ = %+.6f %+.6f·i  (ω_c = %.4f rad/s); conjugate at %d\n",
+            i_hopf, real(vals[i_hopf]), imag(vals[i_hopf]), imag(vals[i_hopf]), i_conj)
+        n_real = count(λ -> abs(imag(λ)) <= hopf_tol, vals)
+        @printf("  %d modes computed, %d on/near the real axis (|Im λ| ≤ %.2g)\n",
+            length(vals), n_real, hopf_tol)
+    end
 
-	# NOTE: no left eigenvectors here. They cost one adjoint factorisation EACH (see
-	# `left_eigenvector`), so they are computed only for the modes a caller actually
-	# puts in the master set — never for the whole spectrum.
-	raw = (; eigenvalues = vals, right_modes = vecs,
-		hopf_index = i_hopf, conjugate_index = i_conj)
-	close_conjugates || return raw
+    # NOTE: no left eigenvectors here. They cost one adjoint factorisation EACH (see
+    # `left_eigenvector`), so they are computed only for the modes a caller actually
+    # puts in the master set — never for the whole spectrum.
+    raw = (; eigenvalues = vals, right_modes = vecs,
+        hopf_index = i_hopf, conjugate_index = i_conj)
+    close_conjugates || return raw
 
-	# The complex shift returns half of each conjugate pair, so `i_conj` above is an argmin
-	# over the wrong candidate set. Closing here rather than leaving it to the caller is the
-	# difference between a usable master pair and one `build_model` rejects.
-	closed = close_under_conjugation(raw; rtol = conjugate_rtol)
-	if verbose
-		n_added = length(closed.eigenvalues) - length(vals)
-		@printf("  %d analytic conjugates appended; conjugate of the Hopf mode at %d\n",
-			n_added, closed.conjugate_index)
-	end
-	return closed
+    # The complex shift returns half of each conjugate pair, so `i_conj` above is an argmin
+    # over the wrong candidate set. Closing here rather than leaving it to the caller is the
+    # difference between a usable master pair and one `build_model` rejects.
+    closed = close_under_conjugation(raw; rtol = conjugate_rtol)
+    if verbose
+        n_added = length(closed.eigenvalues) - length(vals)
+        @printf("  %d analytic conjugates appended; conjugate of the Hopf mode at %d\n",
+            n_added, closed.conjugate_index)
+    end
+    return closed
 end
 
 """
@@ -239,11 +239,11 @@ gives no error when it is, only a spectrum reflected about the imaginary axis, s
 method takes the tuple whole. Every keyword is forwarded unchanged.
 """
 function solve_hopf_eigenproblem(B::Tuple{Vararg{AbstractSparseMatrix}}; kwargs...)
-	length(B) == 2 || throw(ArgumentError(
-		"solve_hopf_eigenproblem expects the two linear operators (B₀, B₁) of a " *
-		"first-order model; got $(length(B)). Pass the two matrices positionally for " *
-		"anything else."))
-	return solve_hopf_eigenproblem(-B[1], B[2]; kwargs...)
+    length(B) == 2 || throw(ArgumentError(
+        "solve_hopf_eigenproblem expects the two linear operators (B₀, B₁) of a " *
+        "first-order model; got $(length(B)). Pass the two matrices positionally for " *
+        "anything else."))
+    return solve_hopf_eigenproblem(-B[1], B[2]; kwargs...)
 end
 
 """
@@ -281,18 +281,18 @@ that does not exist.
 `conjugate_index` is recomputed afterwards, so it now names the true partner.
 """
 function close_under_conjugation(eig; rtol::Real = 1e-4)
-	λ = collect(ComplexF64, eig.eigenvalues)
-	Φ = Matrix{ComplexF64}(eig.right_modes)
-	for k in eachindex(eig.eigenvalues)
-		abs(imag(λ[k])) <= rtol * abs(λ[k]) && continue
-		any(l -> abs(l - conj(λ[k])) <= rtol * abs(λ[k]), λ) && continue
-		push!(λ, conj(λ[k]))
-		Φ = hcat(Φ, conj.(eig.right_modes[:, k]))
-	end
-	i_hopf = eig.hopf_index
-	i_conj = argmin(abs.(λ .- conj(λ[i_hopf])))
-	return (; eigenvalues = λ, right_modes = Φ,
-		hopf_index = i_hopf, conjugate_index = i_conj)
+    λ = collect(ComplexF64, eig.eigenvalues)
+    Φ = Matrix{ComplexF64}(eig.right_modes)
+    for k in eachindex(eig.eigenvalues)
+        abs(imag(λ[k])) <= rtol * abs(λ[k]) && continue
+        any(l -> abs(l - conj(λ[k])) <= rtol * abs(λ[k]), λ) && continue
+        push!(λ, conj(λ[k]))
+        Φ = hcat(Φ, conj.(eig.right_modes[:, k]))
+    end
+    i_hopf = eig.hopf_index
+    i_conj = argmin(abs.(λ .- conj(λ[i_hopf])))
+    return (; eigenvalues = λ, right_modes = Φ,
+        hopf_index = i_hopf, conjugate_index = i_conj)
 end
 
 """
@@ -323,33 +323,33 @@ a caller can see how well-conditioned the mode was.
     `build_model` does.
 """
 function left_eigenvector(A_lin::AbstractSparseMatrix, B_mass::AbstractSparseMatrix,
-	λ::Number, φ::AbstractVector;
-	normalisation::AbstractModeNormalisation = SymmetricBiorthogonal(),
-	scale::Real = 1.0)
-	n = size(A_lin, 1)
-	Ac = complex.(A_lin)
-	Bc = complex.(B_mass)
-	F_adj = klu(Ac' - ComplexF64(λ) * Bc')
-	LM_adj = LinearMap{ComplexF64}(n, n; ismutating = false) do x
-		F_adj \ (Bc' * x)
-	end
-	_, xl, = eigs(LM_adj; nev = 1, which = :LM, maxiter = 3000, ncv = min(60, n - 1))
-	ψ = xl[:, 1]
+        λ::Number, φ::AbstractVector;
+        normalisation::AbstractModeNormalisation = SymmetricBiorthogonal(),
+        scale::Real = 1.0)
+    n = size(A_lin, 1)
+    Ac = complex.(A_lin)
+    Bc = complex.(B_mass)
+    F_adj = klu(Ac' - ComplexF64(λ) * Bc')
+    LM_adj = LinearMap{ComplexF64}(n, n; ismutating = false) do x
+        F_adj \ (Bc' * x)
+    end
+    _, xl, = eigs(LM_adj; nev = 1, which = :LM, maxiter = 3000, ncv = min(60, n - 1))
+    ψ = xl[:, 1]
 
-	α = transpose(ψ) * (Bc * φ)
-	abs(α) > 1e-10 || @warn """
-	Degenerate bilinear pairing ψᵀBφ = $α for λ = $λ. The left and right vectors do not \
-	belong to the same mode, so this mode cannot carry a master coordinate — its \
-	normalisation divides by ~0. Check that the eigenvalue is converged and simple."""
+    α = transpose(ψ) * (Bc * φ)
+    abs(α) > 1e-10 || @warn """
+     Degenerate bilinear pairing ψᵀBφ = $α for λ = $λ. The left and right vectors do not \
+     belong to the same mode, so this mode cannot carry a master coordinate — its \
+     normalisation divides by ~0. Check that the eigenvalue is converged and simple."""
 
-	φg, ψg = _normalise_pair(normalisation, φ, ψ, α)
-	if scale != 1
-		φg = φg .* scale
-		ψg = ψg .* scale
-	end
-	# ψ is the BILINEAR left vector (ψᵀ(A − λB) = 0). The orthogonality equations use
-	# the sesquilinear convention φᴴ(λB − A) = 0, which for the real matrices here
-	# means conj(ψ). Passing ψ un-conjugated pairs each border row with the WRONG mode
-	# of a conjugate pair — cross-mode pairing ≈ 0, hence near-singular resonant solves.
-	return φg, conj.(ψg), α
+    φg, ψg = _normalise_pair(normalisation, φ, ψ, α)
+    if scale != 1
+        φg = φg .* scale
+        ψg = ψg .* scale
+    end
+    # ψ is the BILINEAR left vector (ψᵀ(A − λB) = 0). The orthogonality equations use
+    # the sesquilinear convention φᴴ(λB − A) = 0, which for the real matrices here
+    # means conj(ψ). Passing ψ un-conjugated pairs each border row with the WRONG mode
+    # of a conjugate pair — cross-mode pairing ≈ 0, hence near-singular resonant solves.
+    return φg, conj.(ψg), α
 end

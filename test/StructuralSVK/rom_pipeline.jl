@@ -34,8 +34,7 @@ if !@isdefined(svk_solve)
             resonance_tol_rel::Union{Nothing, Real} = nothing,
             eigenproblem = nothing,
             nev::Union{Nothing, Int} = nothing)
-        bm_kwargs = (; master = master, forcing = forcing, spectrum = eigenproblem,
-            expansion_order = order)
+        bm_kwargs = (; master = master, forcing = forcing, spectrum = eigenproblem)
         (; model, spectral, meta) = nev === nothing ?
                                     build_model(case; bm_kwargs...) :
                                     build_model(case; nev = nev, bm_kwargs...)

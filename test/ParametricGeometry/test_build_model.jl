@@ -19,32 +19,38 @@ function _bm_setup()
     grid = generate_grid(Hexahedron, (2, 1, 1), Vec(0.0, 0.0, 0.0), Vec(2.0, 1.0, 1.0))
     ip = Lagrange{RefHexahedron, 2}()^3
     qr = QuadratureRule{RefHexahedron}(3)
-    cv = CellValues(qr, ip, Lagrange{RefHexahedron, 1}())
-    dh = DofHandler(grid); add!(dh, :u, ip); close!(dh)
-    ch = ConstraintHandler(dh)
-    add!(ch, Dirichlet(:u, getfacetset(grid, "left"), (x, t) -> zeros(3), [1, 2, 3]))
-    close!(ch); update!(ch, 0.0)
-    free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
-    return dh, cv, free
+    cell_values = CellValues(qr, ip, Lagrange{RefHexahedron, 1}())
+    dof_handler = DofHandler(grid)
+    add!(dof_handler, :u, ip)
+    close!(dof_handler)
+    constraints = ConstraintHandler(dof_handler)
+    add!(constraints, Dirichlet(:u, getfacetset(grid, "left"), (x, t) -> zeros(3), [
+        1, 2, 3]))
+    close!(constraints)
+    update!(constraints, 0.0)
+    free = sort(setdiff(1:ndofs(dof_handler), constraints.prescribed_dofs))
+    return dof_handler, cell_values, free
 end
 
 # One geometry parameter (odd N_EXT — the case an adjacent-pairs permutation
 # formula cannot express), then two.
 _geom_1p(x₀) = (one(Tens3b), Tens3b((i, j) -> (i == 1 && j == 1) ? 0.5 : 0.0))
-_geom_2p(x₀) = (one(Tens3b),
-    Tens3b((i, j) -> (i == 1 && j == 1) ? 0.5 : 0.0),
-    Tens3b((i, j) -> (i == 2 && j == 1) ? 0.2 : 0.0))
+function _geom_2p(x₀)
+    (one(Tens3b),
+        Tens3b((i, j) -> (i == 1 && j == 1) ? 0.5 : 0.0),
+        Tens3b((i, j) -> (i == 2 && j == 1) ? 0.2 : 0.0))
+end
 
 @testset "ParametricGeometry build_model contract" begin
-    dh, cv, free = _bm_setup()
+    dof_handler, cell_values, free = _bm_setup()
     material = SVKMaterial(E = 160e3, ν = 0.22, ρ = 2.32e-3)
     damping = RayleighDamping(α = 0.0, β = 0.0)
 
     for (label, geom, n_par) in (("1 parameter (odd N_EXT)", _geom_1p, 1),
-                                 ("2 parameters", _geom_2p, 2))
+        ("2 parameters", _geom_2p, 2))
         @testset "$label" begin
             basis = PGb.GeometryParameterBasis(fill(2, n_par))
-            pcase = SVKb.parametric_model(dh, cv, geom;
+            pcase = SVKb.parametric_model(dof_handler, cell_values, geom;
                 geometry_parameter_basis = basis, material = material,
                 damping = damping, free = free)
             @test pcase isa MORFEFerrite.AbstractAssembledModel

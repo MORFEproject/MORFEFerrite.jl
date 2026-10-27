@@ -21,14 +21,10 @@ function _max_forcing_mode(forcing)
 end
 
 # Number of multiindices in `nvar` variables of total degree 1…order — the size of
-# `all_multiindices_up_to(nvar, order; min_degree = 1)` WITHOUT building it. Counting
-# keeps `build_model` free of `MultiindexSet`, which the contract requires.
-_n_multiindices(nvar::Int, order::Int) = binomial(nvar + order, order) - 1
 
 """
 	build_model(m::AssembledMechanicalModel; master = [1], forcing = nothing,
-				nev = ..., spectrum = nothing, expansion_order = nothing,
-				n_monomials = nothing) -> (; model, spectral, meta)
+				nev = ..., spectrum = nothing) -> (; model, spectral, meta)
 
 Construct the full-order `MORFE.NthOrderModel` and `MORFE.SpectralData` consumed by
 `MORFE.parametrise`.
@@ -54,12 +50,6 @@ counts physical modes (and the returned spectrum contains `2nev` conjugate
 eigenvalues). A supplied spectrum is reused without another eigensolve. In either case
 it must contain every master pair and every pair used as a forcing shape.
 
-`expansion_order` and `n_monomials` size the batched-column cache owned by the FEM
-nonlinear terms; they do not construct or select MORFE's monomial set. For the standard
-total-degree set, `expansion_order = p` reserves
-`binomial(ROM + N_EXT + p, p) - 1` columns. For a custom set, pass
-`n_monomials = length(mset)`. `n_monomials` takes precedence if both are supplied;
-if neither is supplied, one column is reserved.
 
 The result contains:
 
@@ -73,9 +63,7 @@ function build_model(m::AssembledMechanicalModel;
         master::Vector{Int} = [1],
         forcing::Union{Nothing, HarmonicForcing, AbstractVector{<:HarmonicForcing}} = nothing,
         nev::Int = max(10, 2 * max(maximum(master), _max_forcing_mode(forcing)) + 4),
-        spectrum = nothing,
-        expansion_order::Union{Nothing, Int} = nothing,
-        n_monomials::Union{Nothing, Int} = nothing)
+        spectrum = nothing)
     forcings = _forcings(forcing)
     @assert all(>(0), master)&&allunique(master) "master must list distinct positive mode pairs; got master = $master"
     @assert issorted(master) "master must be sorted (the ROM coordinate order follows it); got master = $master"
@@ -85,12 +73,7 @@ function build_model(m::AssembledMechanicalModel;
 
     ROM = 2 * length(master)
     N_EXT = 2 * length(forcings)
-    # Sizes the FEM terms' batched-column cache. `expansion_order` COUNTS the monomials
-    # of a total-degree truncation rather than building the set — `build_model` must not
-    # construct a `MultiindexSet`. A caller with a custom set passes `n_monomials` instead.
-    n_cols = something(n_monomials,
-        expansion_order === nothing ? 1 : _n_multiindices(ROM + N_EXT, expansion_order))
-    terms = Tuple(m.term_factory(d, n_cols) for d in m.nonlinear_degrees)
+    terms = Tuple(m.term_factory(d) for d in m.nonlinear_degrees)
 
     # ── Spectrum of the autonomous operator (the forcing does not enter) ────
     eig_model = NthOrderModel(m.B, terms)
@@ -155,7 +138,7 @@ function build_model(m::AssembledMechanicalModel;
 
     # Keep backend data separate from the physics-independent `(W, R)` returned by
     # `parametrise`; callers can pass this `meta` to the common summary writer.
-    meta = (; forcings = forcings, Ω = Ωs, N_EXT = N_EXT, n_monomials = n_cols,
+    meta = (; forcings = forcings, Ω = Ωs, N_EXT = N_EXT,
         eig_time_s = t_eig, master_indices = master_indices, spectrum = sp,
         external_system = model.external_system,
         ext_eigs = model.external_system === nothing ? ComplexF64[] :

@@ -26,11 +26,11 @@ function _inv_det_setup(; order = 2)
     grid = generate_grid(Hexahedron, (2, 2, 1), Vec(0.0, 0.0, 0.0), Vec(2.0, 1.0, 1.0))
     ip = Lagrange{RefHexahedron, order}()^3
     qr = QuadratureRule{RefHexahedron}(3)
-    cv = CellValues(qr, ip, Lagrange{RefHexahedron, 1}())
-    dh = DofHandler(grid)
-    add!(dh, :u, ip)
-    close!(dh)
-    return (; dh, cv, qr)
+    cell_values = CellValues(qr, ip, Lagrange{RefHexahedron, 1}())
+    dof_handler = DofHandler(grid)
+    add!(dof_handler, :u, ip)
+    close!(dof_handler)
+    return (; dof_handler, cell_values, qr)
 end
 
 _scalar_ip(order) = Lagrange{RefHexahedron, order}()
@@ -40,6 +40,7 @@ _scalar_ip(order) = Lagrange{RefHexahedron, order}()
 function _max_series_gap(a::PGi.PullbackCache, b::PGi.PullbackCache, θ)
     g = 0.0
     for ci in eachindex(a.inv_det), q in eachindex(a.inv_det[ci])
+
         va = PGi.series_value(a.inv_det[ci][q], a.basis, θ)
         vb = PGi.series_value(b.inv_det[ci][q], b.basis, θ)
         g = max(g, abs(va - vb))
@@ -58,14 +59,15 @@ end
     identity_geom = x -> (one(Tens3i), zero(Tens3i))
 
     @testset "J ≡ I: the two methods agree exactly" begin
-        m4 = PGi.PullbackCache(s.dh, s.cv, identity_geom, basis)
-        m3 = PGi.PullbackCache(s.dh, s.cv, identity_geom, basis;
+        m4 = PGi.PullbackCache(s.dof_handler, s.cell_values, identity_geom, basis)
+        m3 = PGi.PullbackCache(s.dof_handler, s.cell_values, identity_geom, basis;
             inverse_determinant = PGi.AuxiliaryFieldInverseDet(_scalar_ip(1); qr = s.qr))
         for θ in ((0.0,), (0.3,), (0.9,))
             @test _max_series_gap(m3, m4, θ) < 1e-12
         end
         # 1/det J ≡ 1: the constant term is 1 and every other coefficient zero.
         for ci in eachindex(m3.inv_det), q in eachindex(m3.inv_det[ci])
+
             ser = m3.inv_det[ci][q]
             @test abs(ser[1] - 1) < 1e-10
             @test maximum(abs, ser[2:end]) < 1e-10
@@ -76,18 +78,19 @@ end
         # The γ = 0 equation is the L² projection of the constant 1. Any Lagrange
         # space contains it, so this is exact to round-off at every order.
         for order in (1, 2)
-            m3 = PGi.PullbackCache(s.dh, s.cv, stretch, basis;
+            m3 = PGi.PullbackCache(s.dof_handler, s.cell_values, stretch, basis;
                 inverse_determinant = PGi.AuxiliaryFieldInverseDet(_scalar_ip(order);
                     qr = s.qr))
             for ci in eachindex(m3.inv_det), q in eachindex(m3.inv_det[ci])
+
                 @test abs(m3.inv_det[ci][q][1] - 1) < 1e-10
             end
         end
     end
 
     @testset "both satisfy their defining identity det J · (1/det J) = 1" begin
-        m4 = PGi.PullbackCache(s.dh, s.cv, stretch, basis)
-        m3 = PGi.PullbackCache(s.dh, s.cv, stretch, basis;
+        m4 = PGi.PullbackCache(s.dof_handler, s.cell_values, stretch, basis)
+        m3 = PGi.PullbackCache(s.dof_handler, s.cell_values, stretch, basis;
             inverse_determinant = PGi.AuxiliaryFieldInverseDet(_scalar_ip(2); qr = s.qr))
         # Well inside the radius |θ| < 1, both must invert det J to the accuracy
         # their own truncation allows.
@@ -99,8 +102,8 @@ end
         # det J = 1 + θ does not depend on x₀, hence neither does 1/det J, and
         # every Lagrange space contains the constants exactly. Method 3 then has
         # no discretisation error to make — it reproduces Method 4 at order 1.
-        m4 = PGi.PullbackCache(s.dh, s.cv, stretch, basis)
-        m3 = PGi.PullbackCache(s.dh, s.cv, stretch, basis;
+        m4 = PGi.PullbackCache(s.dof_handler, s.cell_values, stretch, basis)
+        m3 = PGi.PullbackCache(s.dof_handler, s.cell_values, stretch, basis;
             inverse_determinant = PGi.AuxiliaryFieldInverseDet(_scalar_ip(1); qr = s.qr))
         @test _max_series_gap(m3, m4, (0.2,)) < 1e-13
     end
@@ -114,9 +117,9 @@ end
         # of s"; the uniform case above cannot exhibit it.
         wavy = x -> (one(Tens3i),
             Tens3i((i, j) -> (i == 1 && j == 1) ? sin(x[1]) : 0.0))
-        m4 = PGi.PullbackCache(s.dh, s.cv, wavy, basis)
+        m4 = PGi.PullbackCache(s.dof_handler, s.cell_values, wavy, basis)
         gaps = [_max_series_gap(
-                    PGi.PullbackCache(s.dh, s.cv, wavy, basis;
+                    PGi.PullbackCache(s.dof_handler, s.cell_values, wavy, basis;
                         inverse_determinant = PGi.AuxiliaryFieldInverseDet(
                             _scalar_ip(order); qr = s.qr)),
                     m4, (0.2,))
@@ -128,8 +131,8 @@ end
     end
 
     @testset "mass lumping stays in the right ballpark" begin
-        m4 = PGi.PullbackCache(s.dh, s.cv, stretch, basis)
-        lumped = PGi.PullbackCache(s.dh, s.cv, stretch, basis;
+        m4 = PGi.PullbackCache(s.dof_handler, s.cell_values, stretch, basis)
+        lumped = PGi.PullbackCache(s.dof_handler, s.cell_values, stretch, basis;
             inverse_determinant = PGi.AuxiliaryFieldInverseDet(_scalar_ip(1);
                 qr = s.qr, lump = true))
         # Coarser than the consistent projection, but must still be a 1/det J.
@@ -139,8 +142,8 @@ end
     # The reportable form of the comparison above — this is what produces the
     # thesis numbers (scripts/inverse_determinant_study.jl), so it is gated too.
     @testset "inverse_determinant_comparison measures the trade-off" begin
-        m4 = PGi.PullbackCache(s.dh, s.cv, identity_geom, basis)
-        m3 = PGi.PullbackCache(s.dh, s.cv, identity_geom, basis;
+        m4 = PGi.PullbackCache(s.dof_handler, s.cell_values, identity_geom, basis)
+        m3 = PGi.PullbackCache(s.dof_handler, s.cell_values, identity_geom, basis;
             inverse_determinant = PGi.AuxiliaryFieldInverseDet(_scalar_ip(1); qr = s.qr))
         c = PGi.inverse_determinant_comparison(m4, m3, (0.3,))
         # J ≡ I ⟹ both methods return the single term 1, exactly.
@@ -154,9 +157,9 @@ end
         # a uniform stretch would show nothing, because its det J is constant.
         wavy = x -> (one(Tens3i),
             Tens3i((i, j) -> (i == 1 && j == 1) ? sin(x[1]) : 0.0))
-        w4 = PGi.PullbackCache(s.dh, s.cv, wavy, basis)
+        w4 = PGi.PullbackCache(s.dof_handler, s.cell_values, wavy, basis)
         cs = [PGi.inverse_determinant_comparison(w4,
-                  PGi.PullbackCache(s.dh, s.cv, wavy, basis;
+                  PGi.PullbackCache(s.dof_handler, s.cell_values, wavy, basis;
                       inverse_determinant = PGi.AuxiliaryFieldInverseDet(
                           _scalar_ip(order); qr = s.qr)), (0.2,))
               for order in (1, 2)]
@@ -167,18 +170,20 @@ end
 
         # Two caches over different meshes cannot be lined up point-by-point.
         coarse = generate_grid(Hexahedron, (1, 1, 1), Vec(0.0, 0.0, 0.0), Vec(2.0, 1.0, 1.0))
-        dh_c = DofHandler(coarse)
-        add!(dh_c, :u, Lagrange{RefHexahedron, 1}()^3)
-        close!(dh_c)
-        cv_c = CellValues(s.qr, Lagrange{RefHexahedron, 1}()^3, Lagrange{RefHexahedron, 1}())
-        small = PGi.PullbackCache(dh_c, cv_c, identity_geom, basis)
+        coarse_dof_handler = DofHandler(coarse)
+        add!(coarse_dof_handler, :u, Lagrange{RefHexahedron, 1}()^3)
+        close!(coarse_dof_handler)
+        coarse_cell_values = CellValues(s.qr, Lagrange{RefHexahedron, 1}()^3, Lagrange{
+            RefHexahedron, 1}())
+        small = PGi.PullbackCache(coarse_dof_handler, coarse_cell_values, identity_geom, basis)
         @test_throws ArgumentError PGi.inverse_determinant_comparison(m4, small, (0.1,))
     end
 
     @testset "quadrature mismatch is rejected, not silently tolerated" begin
         # det J is read at the points the cache already holds, so an auxiliary
         # rule with a different point count cannot be lined up with it.
-        @test_throws ArgumentError PGi.PullbackCache(s.dh, s.cv, stretch, basis;
+        @test_throws ArgumentError PGi.PullbackCache(
+            s.dof_handler, s.cell_values, stretch, basis;
             inverse_determinant = PGi.AuxiliaryFieldInverseDet(_scalar_ip(1);
                 qr = QuadratureRule{RefHexahedron}(2)))
     end

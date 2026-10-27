@@ -35,44 +35,45 @@ assumes (Turek–Schäfer channel, Ø 0.1 m cylinder) must match whatever produc
 `meshfile` — see `fem_setup.jl`.
 """
 function fluid_model(meshfile::AbstractString;
-	Re::Real,
-	newton_tol::Float64 = 1e-10,
-	newton_max_iter::Int = 30,
-	s_init::Union{Nothing, Vector{Float64}} = nothing,
-	obstacle_tag::AbstractString = "Cylinder",
-	reference_length::Real = _CYL_D,
-	quadrature_order::Integer = 6,
-	boundary_conditions::Union{Nothing,AbstractFlowBoundaryConditions}=nothing,
-	verbose::Bool = true)
-	Re₀ = Float64(Re)
+        Re::Real,
+        newton_tol::Float64 = 1e-10,
+        newton_max_iter::Int = 30,
+        s_init::Union{Nothing, Vector{Float64}} = nothing,
+        obstacle_tag::AbstractString = "Cylinder",
+        reference_length::Real = _CYL_D,
+        quadrature_order::Integer = 6,
+        boundary_conditions::Union{Nothing, AbstractFlowBoundaryConditions} = nothing,
+        verbose::Bool = true)
+    Re₀ = Float64(Re)
 
-	t_fem = @elapsed fom = setup_fem(String(meshfile);
-		obstacle_tag, reference_length, quadrature_order, boundary_conditions)
-	verbose && @info "FEM: $(fom.n_free) free DOFs (steady state), $(fom.n_free_dpim) (DPIM)"
+    t_fem = @elapsed fom = setup_fem(String(meshfile);
+        obstacle_tag, reference_length, quadrature_order, boundary_conditions)
+    verbose &&
+        @info "FEM: $(fom.n_free) free DOFs (steady state), $(fom.n_free_dpim) (DPIM)"
 
-	t_ss = @elapsed (_, _, s₀_full) = solve_steady_state(fom;
-		Re0 = Re₀, tol = newton_tol, max_iter = newton_max_iter, s_init = s_init)
+    t_ss = @elapsed (_, _, s₀_full) = solve_steady_state(fom;
+        Re0 = Re₀, tol = newton_tol, max_iter = newton_max_iter, s_init = s_init)
 
-	t_ops = @elapsed (B₀, B₁) = assemble_linear_operators(s₀_full, fom; Re0 = Re₀)
+    t_ops = @elapsed (B₀, B₁) = assemble_linear_operators(s₀_full, fom; Re0 = Re₀)
 
-	t_kv = @elapsed begin
-		(K_visc, K_visc_rect) = assemble_K_visc(fom)
-		# η′ = 1/Re − 1/Re₀ multiplies −D·K_raw; applying it here rather than at the
-		# call site is what keeps the convention out of comments.
-		K_visc .*= -fom.reference_length
-		h₀_vec = -fom.reference_length .* (K_visc_rect * s₀_full)
-	end
+    t_kv = @elapsed begin
+        (K_visc, K_visc_rect) = assemble_K_visc(fom)
+        # η′ = 1/Re − 1/Re₀ multiplies −D·K_raw; applying it here rather than at the
+        # call site is what keeps the convention out of comments.
+        K_visc .*= -fom.reference_length
+        h₀_vec = -fom.reference_length .* (K_visc_rect * s₀_full)
+    end
 
-	info = (; n_free = fom.n_free, n_free_dpim = fom.n_free_dpim,
-		backend = "Ferrite P2/P1 Taylor-Hood", meshfile = String(meshfile),
-		reference_length = fom.reference_length, obstacle_tag = fom.obstacle_tag,
-		quadrature_order = fom.quadrature_order,
-		model_fingerprint = fom.model_fingerprint,
-		fem_time_s = t_fem, steady_time_s = t_ss, ops_time_s = t_ops, kvisc_time_s = t_kv)
+    info = (; n_free = fom.n_free, n_free_dpim = fom.n_free_dpim,
+        backend = "Ferrite P2/P1 Taylor-Hood", meshfile = String(meshfile),
+        reference_length = fom.reference_length, obstacle_tag = fom.obstacle_tag,
+        quadrature_order = fom.quadrature_order,
+        model_fingerprint = fom.model_fingerprint,
+        fem_time_s = t_fem, steady_time_s = t_ss, ops_time_s = t_ops, kvisc_time_s = t_kv)
 
-	# `(B₀, B₁)` is `B` — one field, so the operator order is stated once. `B[k + 1]` is Bₖ,
-	# matching `NthOrderModel.linear_terms`, which this tuple is handed to unchanged.
-	B = (B₀, B₁)
-	return AssembledFluidModel{typeof(fom), typeof(B), typeof(K_visc), typeof(K_visc_rect)}(
-		fom, Re₀, s₀_full, B, K_visc, K_visc_rect, h₀_vec, info)
+    # `(B₀, B₁)` is `B` — one field, so the operator order is stated once. `B[k + 1]` is Bₖ,
+    # matching `NthOrderModel.linear_terms`, which this tuple is handed to unchanged.
+    B = (B₀, B₁)
+    return AssembledFluidModel{typeof(fom), typeof(B), typeof(K_visc), typeof(K_visc_rect)}(
+        fom, Re₀, s₀_full, B, K_visc, K_visc_rect, h₀_vec, info)
 end

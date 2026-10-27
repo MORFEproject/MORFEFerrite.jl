@@ -27,20 +27,21 @@ function _param_test_setup(; maxt = 2)
     # order 1 while the field interpolation stays quadratic — sub-parametric.
     geo_ip = Lagrange{RefHexahedron, 1}()
     qr = QuadratureRule{RefHexahedron}(3)
-    cv = CellValues(qr, ip, geo_ip)
-    dh = DofHandler(grid)
-    add!(dh, :u, ip)
-    close!(dh)
-    ch = ConstraintHandler(dh)
-    add!(ch, Dirichlet(:u, getfacetset(grid, "left"), (x, t) -> zeros(3), [1, 2, 3]))
-    close!(ch)
-    update!(ch, 0.0)
-    free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
+    cell_values = CellValues(qr, ip, geo_ip)
+    dof_handler = DofHandler(grid)
+    add!(dof_handler, :u, ip)
+    close!(dof_handler)
+    constraints = ConstraintHandler(dof_handler)
+    add!(constraints, Dirichlet(:u, getfacetset(grid, "left"), (x, t) -> zeros(3), [
+        1, 2, 3]))
+    close!(constraints)
+    update!(constraints, 0.0)
+    free = sort(setdiff(1:ndofs(dof_handler), constraints.prescribed_dofs))
     # Two forms of the same map: the non-parametric SVK term takes the `Dict`,
     # the parametric assembly path takes the dense vector.
-    free_to_local = Dict(d => i for (i, d) in enumerate(free))
-    return (; grid, dh, cv, free, free_to_local,
-        f2l = PG.free_dof_map(ndofs(dh), free), n_free = length(free))
+    dof_to_free = Dict(d => i for (i, d) in enumerate(free))
+    return (; grid, dof_handler, cell_values, free, dof_to_free,
+        dense_dof_to_free = PG.free_dof_map(ndofs(dof_handler), free), n_free = length(free))
 end
 
 const E_TEST, ν_TEST, ρ_TEST = 160e3, 0.22, 2.32e-3
@@ -55,18 +56,20 @@ _geom_identity(x₀) = (one(Tens3), zero(Tens3))
     s = _param_test_setup()
     b = PG.GeometryParameterBasis([1])                     # one parameter, ∇ψ = 0 ⇒ J(θ) ≡ I
     stress = SVK.IsotropicStress(λ_TEST, μ_TEST)
-    cache = PG.PullbackCache(s.dh, s.cv, _geom_identity, b; det_powers = [2, 3])
-    pd = PG.ParametricDiscretisation(s.dh, s.cv, s.f2l, s.n_free, cache)
+    cache = PG.PullbackCache(
+        s.dof_handler, s.cell_values, _geom_identity, b; det_powers = [2, 3])
+    pd = PG.ParametricDiscretisation(
+        s.dof_handler, s.cell_values, s.dense_dof_to_free, s.n_free, cache)
     α0 = findfirst(α -> all(iszero, α), b.mset.exponents)
 
     @testset "linear operators ≡ svk_assemble_KM!" begin
-        K_ref = allocate_matrix(s.dh)
-        M_ref = allocate_matrix(s.dh)
-        SVK.assemble_KM!(K_ref, M_ref, s.dh, s.cv, stress, ρ_TEST)
+        K_ref = allocate_matrix(s.dof_handler)
+        M_ref = allocate_matrix(s.dof_handler)
+        SVK.assemble_KM!(K_ref, M_ref, s.dof_handler, s.cell_values, stress, ρ_TEST)
 
         L = PG.nterms(b)
-        K_par = [allocate_matrix(s.dh) for _ in 1:L]
-        M_par = [allocate_matrix(s.dh) for _ in 1:L]
+        K_par = [allocate_matrix(s.dof_handler) for _ in 1:L]
+        M_par = [allocate_matrix(s.dof_handler) for _ in 1:L]
         PG.assemble_linear_series!(K_par, M_par, pd, SVK.SVKPullbackKernel{0}(stress, ρ_TEST))
 
         @test Matrix(K_par[α0]) ≈ Matrix(K_ref) rtol=1e-12
@@ -85,8 +88,9 @@ _geom_identity(x₀) = (one(Tens3), zero(Tens3))
         # `evaluate_term!` indexes `xs` by DERIVATIVE-ORDER slot and repeats it
         # `multiindex[slot]` times, so it evaluates F(u,…,u) — hence one state here.
         for DEG in (2, 3)
-            term = SVK.svk_nonlinearity(DEG, s.dh, s.cv, s.free_to_local, s.n_free,
-                λ_TEST, μ_TEST; max_unique_cols = DEG)
+            term = SVK.svk_nonlinearity(
+                DEG, s.dof_handler, s.cell_values, s.dof_to_free, s.n_free,
+                λ_TEST, μ_TEST)
             ref = zeros(ComplexF64, s.n_free)
             MORFE.evaluate_term!(ref, term, (u, u), nothing)
 

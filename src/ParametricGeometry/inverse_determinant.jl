@@ -95,17 +95,18 @@ Note `(1/det J)^p` is formed as the `p`-th power of the interpolant `s`, not as 
 separately projected field — a different (and untaken) Method-3 variant.
 """
 struct AuxiliaryFieldInverseDet{IP, QR} <: AbstractInverseDeterminant
-	ip::IP
-	qr::QR
-	lump::Bool
-	tol::Float64
+    ip::IP
+    qr::QR
+    lump::Bool
+    tol::Float64
 end
 
-AuxiliaryFieldInverseDet(ip; qr, lump::Bool = false, tol::Real = 1e-10) =
-	AuxiliaryFieldInverseDet{typeof(ip), typeof(qr)}(ip, qr, lump, Float64(tol))
+function AuxiliaryFieldInverseDet(ip; qr, lump::Bool = false, tol::Real = 1e-10)
+    AuxiliaryFieldInverseDet{typeof(ip), typeof(qr)}(ip, qr, lump, Float64(tol))
+end
 
 """
-	build_inverse_determinant(strategy, dh, cv, basis, det) -> Vector{Vector{Vector{Float64}}}
+	build_inverse_determinant(strategy, dof_handler, cell_values, basis, det) -> Vector{Vector{Vector{Float64}}}
 
 The θ-series of `1/det J`, indexed `[cell][qp]`, from the already-computed `det J`
 series in the same layout. The single seam between Methods 3 and 4.
@@ -113,10 +114,11 @@ series in the same layout. The single seam between Methods 3 and 4.
 function build_inverse_determinant end
 
 # ── Method 4 ─────────────────────────────────────────────────────────────────
-build_inverse_determinant(::PowerSeriesInverseDet, dh, cv,
-	basis::GeometryParameterBasis, det) =
-	[[reciprocal_series(det[ci][q], basis) for q in eachindex(det[ci])]
-	 for ci in eachindex(det)]
+function build_inverse_determinant(::PowerSeriesInverseDet, dof_handler, cell_values,
+        basis::GeometryParameterBasis, det)
+    [[reciprocal_series(det[ci][q], basis) for q in eachindex(det[ci])]
+     for ci in eachindex(det)]
+end
 
 # ── Method 3 ─────────────────────────────────────────────────────────────────
 
@@ -125,117 +127,119 @@ build_inverse_determinant(::PowerSeriesInverseDet, dh, cv,
 # rather than one per basis term — measured, not assumed, so a degenerate
 # geometry costs nothing extra.
 function _det_support(det, L::Int; tol::Float64 = 0.0)
-	keep = falses(L)
-	for ci in eachindex(det), q in eachindex(det[ci])
-		d = det[ci][q]
-		@inbounds for m in 1:L
-			abs(d[m]) > tol && (keep[m] = true)
-		end
-	end
-	keep[1] = true                      # c₀ always participates: it IS the operator
-	return findall(keep)
+    keep = falses(L)
+    for ci in eachindex(det), q in eachindex(det[ci])
+
+        d = det[ci][q]
+        @inbounds for m in 1:L
+            abs(d[m]) > tol && (keep[m] = true)
+        end
+    end
+    keep[1] = true                      # c₀ always participates: it IS the operator
+    return findall(keep)
 end
 
-function build_inverse_determinant(s::AuxiliaryFieldInverseDet, dh, cv,
-	basis::GeometryParameterBasis, det)
-	grid = Ferrite.get_grid(dh)
-	dh_s = DofHandler(grid)
-	add!(dh_s, :s, s.ip)
-	close!(dh_s)
-	cv_s = CellValues(s.qr, s.ip)
-	getnquadpoints(cv_s) == getnquadpoints(cv) || throw(ArgumentError(
-		"AuxiliaryFieldInverseDet: the auxiliary quadrature has $(getnquadpoints(cv_s)) " *
-		"points but the physics CellValues has $(getnquadpoints(cv)) — pass the same " *
-		"`qr` the physics uses, so det J is read where it was computed"))
+function build_inverse_determinant(s::AuxiliaryFieldInverseDet, dof_handler, cell_values,
+        basis::GeometryParameterBasis, det)
+    grid = Ferrite.get_grid(dof_handler)
+    aux_dof_handler = DofHandler(grid)
+    add!(aux_dof_handler, :s, s.ip)
+    close!(aux_dof_handler)
+    aux_cell_values = CellValues(s.qr, s.ip)
+    getnquadpoints(aux_cell_values) == getnquadpoints(cell_values) || throw(ArgumentError(
+        "AuxiliaryFieldInverseDet: the auxiliary quadrature has " *
+        "$(getnquadpoints(aux_cell_values)) points but the physics CellValues has " *
+        "$(getnquadpoints(cell_values)) — pass the same " *
+        "`qr` the physics uses, so det J is read where it was computed"))
 
-	L = nterms(basis)
-	support = _det_support(det, L)
-	pos = Dict(m => k for (k, m) in enumerate(support))   # basis index → matrix slot
+    L = nterms(basis)
+    support = _det_support(det, L)
+    pos = Dict(m => k for (k, m) in enumerate(support))   # basis index → matrix slot
 
-	# ── one sweep: every A_β and the right-hand side b, together ──
-	A = [allocate_matrix(dh_s) for _ in support]
-	asm = [start_assemble(a) for a in A]
-	b = zeros(Float64, ndofs(dh_s))
-	nbf = getnbasefunctions(cv_s)
-	Ae = [zeros(nbf, nbf) for _ in support]
-	be = zeros(nbf)
+    # ── one sweep: every A_β and the right-hand side b, together ──
+    A = [allocate_matrix(aux_dof_handler) for _ in support]
+    asm = [start_assemble(a) for a in A]
+    b = zeros(Float64, ndofs(aux_dof_handler))
+    nbf = getnbasefunctions(aux_cell_values)
+    Ae = [zeros(nbf, nbf) for _ in support]
+    be = zeros(nbf)
 
-	for (ci, cell) in enumerate(CellIterator(dh_s))
-		for k in eachindex(Ae)
-			fill!(Ae[k], 0.0)
-		end
-		fill!(be, 0.0)
-		reinit!(cv_s, cell)
-		for q in 1:getnquadpoints(cv_s)
-			dΩ₀ = getdetJdV(cv_s, q)
-			d = det[ci][q]
-			for i in 1:nbf
-				Ni = shape_value(cv_s, q, i)
-				be[i] += Ni * dΩ₀
-				for j in 1:nbf
-					NiNj = Ni * shape_value(cv_s, q, j) * dΩ₀
-					@inbounds for (k, m) in enumerate(support)
-						Ae[k][i, j] += NiNj * d[m]
-					end
-				end
-			end
-		end
-		dofs = celldofs(cell)
-		for k in eachindex(Ae)
-			assemble!(asm[k], dofs, Ae[k])
-		end
-		for (i, dof) in pairs(dofs)
-			b[dof] += be[i]
-		end
-	end
+    for (ci, cell) in enumerate(CellIterator(aux_dof_handler))
+        for k in eachindex(Ae)
+            fill!(Ae[k], 0.0)
+        end
+        fill!(be, 0.0)
+        reinit!(aux_cell_values, cell)
+        for q in 1:getnquadpoints(aux_cell_values)
+            dΩ₀ = getdetJdV(aux_cell_values, q)
+            d = det[ci][q]
+            for i in 1:nbf
+                Ni = shape_value(aux_cell_values, q, i)
+                be[i] += Ni * dΩ₀
+                for j in 1:nbf
+                    NiNj = Ni * shape_value(aux_cell_values, q, j) * dΩ₀
+                    @inbounds for (k, m) in enumerate(support)
+                        Ae[k][i, j] += NiNj * d[m]
+                    end
+                end
+            end
+        end
+        dofs = celldofs(cell)
+        for k in eachindex(Ae)
+            assemble!(asm[k], dofs, Ae[k])
+        end
+        for (i, dof) in pairs(dofs)
+            b[dof] += be[i]
+        end
+    end
 
-	# ── triangular solve in graded-lex order, ONE factorisation ──
-	A₀ = A[pos[1]]
-	F = s.lump ? Diagonal(vec(sum(A₀; dims = 2))) : cholesky(Symmetric(A₀))
-	sk = Vector{Vector{Float64}}(undef, L)
-	sk[1] = F \ b
+    # ── triangular solve in graded-lex order, ONE factorisation ──
+    A₀ = A[pos[1]]
+    F = s.lump ? Diagonal(vec(sum(A₀; dims = 2))) : cholesky(Symmetric(A₀))
+    sk = Vector{Vector{Float64}}(undef, L)
+    sk[1] = F \ b
 
-	# `1 ∈ V_h` for any Lagrange space, so when the reference configuration is
-	# undeformed (c₀ ≡ 1) the γ = 0 equation is the projection of the constant 1
-	# and must return it to round-off. A sharp, free check on the whole assembly.
-	if all(abs(det[ci][q][1] - 1) <= 1e-12
-		   for ci in eachindex(det) for q in eachindex(det[ci]))
-		dev = maximum(abs, sk[1] .- 1)
-		dev <= s.tol || @warn "AuxiliaryFieldInverseDet: s₀ deviates from 1 by $dev " *
-							  "although det J₀ ≡ 1 — the auxiliary mass matrix or its " *
-							  "quadrature is inconsistent with the physics CellValues."
-	end
+    # `1 ∈ V_h` for any Lagrange space, so when the reference configuration is
+    # undeformed (c₀ ≡ 1) the γ = 0 equation is the projection of the constant 1
+    # and must return it to round-off. A sharp, free check on the whole assembly.
+    if all(abs(det[ci][q][1] - 1) <= 1e-12
+    for ci in eachindex(det) for q in eachindex(det[ci]))
+        dev = maximum(abs, sk[1] .- 1)
+        dev <= s.tol || @warn "AuxiliaryFieldInverseDet: s₀ deviates from 1 by $dev " *
+              "although det J₀ ≡ 1 — the auxiliary mass matrix or its " *
+              "quadrature is inconsistent with the physics CellValues."
+    end
 
-	rhs = zeros(Float64, ndofs(dh_s))
-	D = basis.diff                                   # position of γ − β, 0 if outside
-	@inbounds for k in 2:L
-		fill!(rhs, 0.0)
-		for m in support
-			m == 1 && continue                       # β = 0 is the operator on the left
-			j = D[k, m]
-			j == 0 && continue
-			rhs .-= A[pos[m]] * sk[j]                # graded-lex ⟹ sk[j] is ready
-		end
-		sk[k] = F \ rhs
-	end
+    rhs = zeros(Float64, ndofs(aux_dof_handler))
+    D = basis.diff                                   # position of γ − β, 0 if outside
+    @inbounds for k in 2:L
+        fill!(rhs, 0.0)
+        for m in support
+            m == 1 && continue                       # β = 0 is the operator on the left
+            j = D[k, m]
+            j == 0 && continue
+            rhs .-= A[pos[m]] * sk[j]                # graded-lex ⟹ sk[j] is ready
+        end
+        sk[k] = F \ rhs
+    end
 
-	# ── evaluate the coefficient fields at the quadrature points ──
-	inv = [Vector{Vector{Float64}}(undef, length(det[ci])) for ci in eachindex(det)]
-	se = zeros(Float64, getnbasefunctions(cv_s))
-	for (ci, cell) in enumerate(CellIterator(dh_s))
-		reinit!(cv_s, cell)
-		dofs = celldofs(cell)
-		for q in 1:getnquadpoints(cv_s)
-			inv[ci][q] = Vector{Float64}(undef, L)
-		end
-		for k in 1:L
-			for (i, dof) in pairs(dofs)
-				se[i] = sk[k][dof]
-			end
-			for q in 1:getnquadpoints(cv_s)
-				inv[ci][q][k] = function_value(cv_s, q, se)
-			end
-		end
-	end
-	return inv
+    # ── evaluate the coefficient fields at the quadrature points ──
+    inv = [Vector{Vector{Float64}}(undef, length(det[ci])) for ci in eachindex(det)]
+    se = zeros(Float64, getnbasefunctions(aux_cell_values))
+    for (ci, cell) in enumerate(CellIterator(aux_dof_handler))
+        reinit!(aux_cell_values, cell)
+        dofs = celldofs(cell)
+        for q in 1:getnquadpoints(aux_cell_values)
+            inv[ci][q] = Vector{Float64}(undef, L)
+        end
+        for k in 1:L
+            for (i, dof) in pairs(dofs)
+                se[i] = sk[k][dof]
+            end
+            for q in 1:getnquadpoints(aux_cell_values)
+                inv[ci][q][k] = function_value(aux_cell_values, q, se)
+            end
+        end
+    end
+    return inv
 end

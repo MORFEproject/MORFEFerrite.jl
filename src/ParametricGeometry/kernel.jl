@@ -55,10 +55,11 @@ weak form exactly as it would in the reference configuration.
 abstract type AbstractPullbackKernel{DEG} end
 
 """
-	QPContext(cv, q, basis, adj, det, inv_det)
+	QPContext(cell_values, q, basis, adj, det, inv_det)
 
-What a kernel sees at one quadrature point: the `CellValues` (already
-`reinit!`-ed) and the point index, so it can reach shape values; the
+What a kernel sees at one quadrature point: `cell_values`, the physics' Ferrite
+`CellValues` already `reinit!`-ed for the cell, and the point index `q`, so it can reach
+shape values; the
 [`GeometryParameterBasis`](@ref) its series live in; and the geometry's `adj J`, `det J` and
 `1/det J` series at this point.
 
@@ -67,12 +68,12 @@ A nonlinear kernel normally leaves the determinant weighting to the driver (see
 kernel weights its own entries, since stiffness and mass carry different powers.
 """
 struct QPContext{Nθ, TT, CV}
-	cv::CV
-	q::Int
-	basis::GeometryParameterBasis{Nθ}
-	adj::Vector{TT}
-	det::Vector{Float64}
-	inv_det::Vector{Float64}
+    cell_values::CV
+    q::Int
+    basis::GeometryParameterBasis{Nθ}
+    adj::Vector{TT}
+    det::Vector{Float64}
+    inv_det::Vector{Float64}
 end
 
 nterms(ctx::QPContext) = nterms(ctx.basis)
@@ -87,23 +88,23 @@ nterms(ctx::QPContext) = nterms(ctx.basis)
 # function per quadrature point per cell and the allocating form dominated the
 # profile. `out` must already be length `length(adj_ser)`.
 @inline function ∇adj_series!(out::AbstractVector, ∇u, adj_ser::Vector)
-	@inbounds for i in eachindex(adj_ser)
-		out[i] = ∇u ⋅ adj_ser[i]
-	end
-	return out
+    @inbounds for i in eachindex(adj_ser)
+        out[i] = ∇u ⋅ adj_ser[i]
+    end
+    return out
 end
 
 # --- interface fallbacks ---------------------------------------------
 det_weight_power(k::AbstractPullbackKernel) = throw(MethodError(det_weight_power, (k,)))
 
 function qp_prepare(k::AbstractPullbackKernel, ctx, ∇u_adj)
-	throw(MethodError(qp_prepare, (k, ctx, ∇u_adj)))
+    throw(MethodError(qp_prepare, (k, ctx, ∇u_adj)))
 end
 
 function qp_integrand!(integ, k::AbstractPullbackKernel, ctx, state, ∇N_adj)
-	throw(MethodError(qp_integrand!, (integ, k, ctx, state, ∇N_adj)))
+    throw(MethodError(qp_integrand!, (integ, k, ctx, state, ∇N_adj)))
 end
 
 function linear_qp_series!(a_ser, b_ser, k::AbstractPullbackKernel, ctx, i, j)
-	throw(MethodError(linear_qp_series!, (a_ser, b_ser, k, ctx, i, j)))
+    throw(MethodError(linear_qp_series!, (a_ser, b_ser, k, ctx, i, j)))
 end

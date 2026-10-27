@@ -24,7 +24,7 @@ function _element_data(path::AbstractString, element_type::Integer)
             node_tags = Int64.(node_tags),
             coordinates = Float64.(coordinates),
             element_tags = Int64.(element_tags),
-            connectivity = Int64.(connectivity),
+            connectivity = Int64.(connectivity)
         )
     end
 end
@@ -34,7 +34,7 @@ end
         :load_comsol_grid,
         :abaqus_to_gmsh, :abaqus_to_gmsh_linear,
         :comsol_to_gmsh, :comsol_to_gmsh_linear,
-        :gmsh_to_comsol,
+        :gmsh_to_comsol
     )
         @test isdefined(MORFEFerrite, name)
         @test getfield(MORFEFerrite, name) === getfield(MORFEFerrite.Common.MeshIO, name)
@@ -60,7 +60,7 @@ end
         @test length(data20.connectivity) == 20
         coords = Dict(
             data20.node_tags[i] => Tuple(data20.coordinates[(3i - 2):3i])
-            for i in eachindex(data20.node_tags)
+        for i in eachindex(data20.node_tags)
         )
         @test coords[data20.connectivity[10]] == (0.0, 0.5, 0.0)
         @test _with_gmsh(c3d20_out) do
@@ -155,7 +155,7 @@ end
         MORFEFerrite.comsol_to_gmsh(roundtrip_comsol, roundtrip_gmsh)
         h27_roundtrip = _element_data(roundtrip_gmsh, 12)
         @test h27_roundtrip.node_tags == h27.node_tags
-        @test h27_roundtrip.coordinates ≈ h27.coordinates atol = 1e-12 rtol = 1e-14
+        @test h27_roundtrip.coordinates≈h27.coordinates atol=1e-12 rtol=1e-14
         @test h27_roundtrip.element_tags == h27.element_tags
         @test h27_roundtrip.connectivity == h27.connectivity
 
@@ -165,7 +165,7 @@ end
         MORFEFerrite.comsol_to_gmsh(t10_roundtrip_comsol, t10_roundtrip_gmsh)
         t10_roundtrip = _element_data(t10_roundtrip_gmsh, 11)
         @test t10_roundtrip.node_tags == t10.node_tags
-        @test t10_roundtrip.coordinates ≈ t10.coordinates atol = 1e-12 rtol = 1e-14
+        @test t10_roundtrip.coordinates≈t10.coordinates atol=1e-12 rtol=1e-14
         @test t10_roundtrip.element_tags == t10.element_tags
         @test t10_roundtrip.connectivity == t10.connectivity
 
@@ -216,7 +216,7 @@ end
             isempty(before.element_tags) && continue
             after = _element_data(arch_roundtrip_gmsh, element_type)
             @test after.node_tags == before.node_tags
-            @test after.coordinates ≈ before.coordinates atol = 1e-12 rtol = 1e-14
+            @test after.coordinates≈before.coordinates atol=1e-12 rtol=1e-14
             @test after.element_tags == before.element_tags
             @test after.connectivity == before.connectivity
         end

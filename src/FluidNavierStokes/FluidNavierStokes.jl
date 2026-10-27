@@ -8,7 +8,7 @@ Pipeline (see the Kármán example driver):
 	fom = setup_fem(meshfile)                       # Ferrite P2/P1 spaces + BCs
 	s0 = solve_steady_state(fom; Re0)              # Newton base flow
 	ops = assemble_linear_operators(s0, fom; Re0)   # linearised operators
-	conv = FluidConvection(fom; max_unique_cols)     # f₂(s,s) FEMMultilinearMap{1}
+	conv = FluidConvection(fom)                      # f₂(s,s) FEMMultilinearMap{1}
 	g1 = make_param_coupling(K_visc_free)          # −D·η′·K_raw·u′ (Re-parametric)
 	h0 = make_base_forcing(h₀_vec_free)            # base-flow forcing direction
 
@@ -25,7 +25,7 @@ using SHA: sha256
 using Serialization: serialize   # observables.jl writes the VTK/lift bundles
 using KLU
 using ..Common: AbstractAssembledModel, Common, write_paraview_p2p1,
-	write_paraview_p2p1_phase_animation
+                write_paraview_p2p1_phase_animation
 import ..Common: build_model, summary_entries
 
 # Include order mirrors the Kármán driver (steady state feeds the linearisation).
@@ -61,9 +61,9 @@ export solve_steady_state, assemble_steady_nse!, compute_drag_lift
 export assemble_linear_operators, check_linearisation, compute_pressure_lift_weights
 export FluidConvection, make_param_coupling, make_base_forcing, assemble_K_visc
 export velocity_dof_mask, assemble_velocity_mass_full, domain_area,
-	prepare_energy_gram, write_energy_gram
+       prepare_energy_gram, write_energy_gram
 export solve_hopf_eigenproblem, close_under_conjugation, AbstractModeNormalisation,
-	SymmetricBiorthogonal, LeftBiorthogonal, NoNormalisation
+       SymmetricBiorthogonal, LeftBiorthogonal, NoNormalisation
 # Exported because MODE SELECTION belongs to the driver, not to this module, and choosing
 # which modes can carry a master coordinate requires their bilinear pairing α = ψᵀB₁φ.
 # See the warning in its docstring: never call it for both halves of a conjugate pair.
@@ -79,17 +79,17 @@ export write_paraview_p2p1, write_paraview_p2p1_phase_animation
 export ROMPoly, load_rom_poly, slaved_R1, truncate_dynamics
 export promoted_equilibrium, promoted_amplitude
 export rom_po_residual, rom_po_frequency, rom_hopf_eta,
-	rom_palc_tangent, rom_palc_step, trace_limit_cycle_branch, branch_amplitude_scale,
-	roots_at_re, sweep_branch_in_re
+       rom_palc_tangent, rom_palc_step, trace_limit_cycle_branch, branch_amplitude_scale,
+       roots_at_re, sweep_branch_in_re
 export rom_invariants, read_invariants, write_invariants
 export homological_denominators, manifold_ratio_test, modal_growth, domb_sykes,
-	eta_series_report, backbone_direction, fold_overlap
+       eta_series_report, backbone_direction, fold_overlap
 
 # Resummation (resummation.jl) — summing the DPIM series past its radius of convergence
 export pade, resum, amplitude_series, tke_series, branch_by_amplitude
 
 # Full-order periodic orbits (fom_orbit.jl)
 export eval_perturbation_convection!, build_imex_operators, integrate_orbit!,
-	find_periodic_orbit, seed_from_branch, measure_orbit
+       find_periodic_orbit, seed_from_branch, measure_orbit
 
 end # module FluidNavierStokes

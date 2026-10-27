@@ -37,66 +37,67 @@ What this method does, and what it deliberately leaves to the caller:
 entries `2p-1, 2p`.
 """
 function build_model(m::AssembledParametricModel;
-	master::Vector{Int} = [1],
-	spectrum,
-	conjugate_permutation = nothing,
-	diagnostics::Bool = true,
-	diagnostics_rtol::Real = 1e-12)
-	@assert all(>(0), master)&&allunique(master) "master must list distinct positive mode pairs; got master = $master"
-	@assert issorted(master) "master must be sorted (the ROM coordinate order follows it); got master = $master"
+        master::Vector{Int} = [1],
+        spectrum,
+        conjugate_permutation = nothing,
+        diagnostics::Bool = true,
+        diagnostics_rtol::Real = 1e-12)
+    @assert all(>(0), master)&&allunique(master) "master must list distinct positive mode pairs; got master = $master"
+    @assert issorted(master) "master must be sorted (the ROM coordinate order follows it); got master = $master"
 
-	# Measured, not assumed: which θ-multiindices carry nothing. Silent when all do.
-	diagnostics && report_zero_coefficients(m; rtol = diagnostics_rtol)
-	# Method 4 is a geometric series and has a RADIUS. Outside it no truncation
-	# order converges, and the assembled model still looks well formed — so the
-	# range is measured here rather than left to the caller to discover. Silent
-	# for a volume-preserving transform, which is unconditionally convergent.
-	diagnostics && report_geometry_validity(m.pd.cache)
+    # Measured, not assumed: which θ-multiindices carry nothing. Silent when all do.
+    diagnostics && report_zero_coefficients(m; rtol = diagnostics_rtol)
+    # Method 4 is a geometric series and has a RADIUS. Outside it no truncation
+    # order converges, and the assembled model still looks well formed — so the
+    # range is measured here rather than left to the caller to discover. Silent
+    # for a volume-preserving transform, which is unconditionally convergent.
+    diagnostics && report_geometry_validity(m.pd.cache)
 
-	b = basis(m.pd)
-	sp = spectrum
-	ORD = model_order(m)
-	n_free = m.pd.n_free
-	N_EXT = m.n_external_parameters
+    b = basis(m.pd)
+    sp = spectrum
+    ORD = model_order(m)
+    n_free = m.pd.n_free
+    N_EXT = m.n_external_parameters
 
-	# ── Linear terms: base coefficients, zero-padded to the augmented order ──
-	base_terms = [op.arrays[1] for op in m.operators]
-	@assert length(base_terms)<=ORD "got $(length(base_terms)) linear operators but ORD = $ORD"
-	ZERO = spzeros(eltype(base_terms[1]), n_free, n_free)
-	linear_terms = Tuple(vcat(base_terms, fill(ZERO, ORD + 1 - length(base_terms))))
+    # ── Linear terms: base coefficients, zero-padded to the augmented order ──
+    base_terms = [op.arrays[1] for op in m.operators]
+    @assert length(base_terms)<=ORD "got $(length(base_terms)) linear operators but ORD = $ORD"
+    ZERO = spzeros(eltype(base_terms[1]), n_free, n_free)
+    linear_terms = Tuple(vcat(base_terms, fill(ZERO, ORD + 1 - length(base_terms))))
 
-	# ── Nonlinear terms: the θ-expanded forms, then every α ≠ 0 correction ──
-	terms = Any[]
-	for (pm, arity) in zip(m.maps, m.map_arities)
-		append!(terms, multilinear_maps(pm; arity = arity,
-			external_components = m.external_components))
-	end
-	for op in m.operators
-		append!(terms, build_linear_corrections(op.arrays, b, op.arity;
-			external_components = m.external_components))
-	end
+    # ── Nonlinear terms: the θ-expanded forms, then every α ≠ 0 correction ──
+    terms = Any[]
+    for (pm, arity) in zip(m.maps, m.map_arities)
+        append!(terms, multilinear_maps(pm; arity = arity,
+            external_components = m.external_components))
+    end
+    for op in m.operators
+        append!(terms,
+            build_linear_corrections(op.arrays, b, op.arity;
+                external_components = m.external_components))
+    end
 
-	# ── The frozen θ states ────────────────────────────────────────────────
-	ext_sys = ExternalSystem(ntuple(_ -> complex(0.0, 0.0), N_EXT))
-	model = NthOrderModel(linear_terms, Tuple(terms), ext_sys)
+    # ── The frozen θ states ────────────────────────────────────────────────
+    ext_sys = ExternalSystem(ntuple(_ -> complex(0.0, 0.0), N_EXT))
+    model = NthOrderModel(linear_terms, Tuple(terms), ext_sys)
 
-	# ── Spectral data, reconciled against the AUGMENTED order ──────────────
-	master_indices = reduce(vcat, [[2p - 1, 2p] for p in master])
-	n_pairs = length(sp.eigenvalues) ÷ 2
-	σ = reduce(vcat, [[2p, 2p - 1] for p in 1:n_pairs])
-	sd = SpectralData(model, sp; master = master_indices, conjugate_permutation = σ)
+    # ── Spectral data, reconciled against the AUGMENTED order ──────────────
+    master_indices = reduce(vcat, [[2p - 1, 2p] for p in master])
+    n_pairs = length(sp.eigenvalues) ÷ 2
+    σ = reduce(vcat, [[2p, 2p - 1] for p in 1:n_pairs])
+    sd = SpectralData(model, sp; master = master_indices, conjugate_permutation = σ)
 
-	# ── The NVAR-length permutation, derived. It spans the external states, so
-	#    it goes to `parametrise`, which uses it verbatim — not to SpectralData,
-	#    which validates a master-block or spectrum-wide vector. ─────────────
-	master_block = reduce(vcat, [[2p, 2p - 1] for p in 1:length(master)])
-	perm = conjugate_permutation === nothing ?
-		   full_conjugate_permutation(master_block, ext_sys) :
-		   collect(Int, conjugate_permutation)
+    # ── The NVAR-length permutation, derived. It spans the external states, so
+    #    it goes to `parametrise`, which uses it verbatim — not to SpectralData,
+    #    which validates a master-block or spectrum-wide vector. ─────────────
+    master_block = reduce(vcat, [[2p, 2p - 1] for p in 1:length(master)])
+    perm = conjugate_permutation === nothing ?
+           full_conjugate_permutation(master_block, ext_sys) :
+           collect(Int, conjugate_permutation)
 
-	meta = (; conjugate_permutation = perm, master_indices = master_indices,
-		N_EXT = N_EXT, n_geometry_parameters = m.n_geometry_parameters, ORD = ORD, spectrum = sp,
-		external_components = copy(m.external_components),
-		n_terms = length(terms), geometry_parameter_terms = nterms(b))
-	return (; model = model, spectral = sd, meta = meta)
+    meta = (; conjugate_permutation = perm, master_indices = master_indices,
+        N_EXT = N_EXT, n_geometry_parameters = m.n_geometry_parameters, ORD = ORD, spectrum = sp,
+        external_components = copy(m.external_components),
+        n_terms = length(terms), geometry_parameter_terms = nterms(b))
+    return (; model = model, spectral = sd, meta = meta)
 end

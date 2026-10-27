@@ -88,27 +88,28 @@ end
     grid = _test_grid()
     ip = Lagrange{RefHexahedron, 2}()^3
     qr = QuadratureRule{RefHexahedron}(3)
-    cv = CellValues(qr, ip)
-    dh = DofHandler(grid)
-    add!(dh, :u, ip)
-    close!(dh)
+    cell_values = CellValues(qr, ip)
+    dof_handler = DofHandler(grid)
+    add!(dof_handler, :u, ip)
+    close!(dof_handler)
 
-    Ki = allocate_matrix(dh)
-    Mi = allocate_matrix(dh)
-    Ka = allocate_matrix(dh)
-    Ma = allocate_matrix(dh)
-    svk_assemble_KM!(Ki, Mi, dh, cv, SVK.SVKMaterial(E = _E, ν = _ν, ρ = _ρ))
-    svk_assemble_KM!(Ka, Ma, dh, cv, iso_crystal())
+    Ki = allocate_matrix(dof_handler)
+    Mi = allocate_matrix(dof_handler)
+    Ka = allocate_matrix(dof_handler)
+    Ma = allocate_matrix(dof_handler)
+    svk_assemble_KM!(
+        Ki, Mi, dof_handler, cell_values, SVK.SVKMaterial(E = _E, ν = _ν, ρ = _ρ))
+    svk_assemble_KM!(Ka, Ma, dof_handler, cell_values, iso_crystal())
     @test maximum(abs.(Ki - Ka)) / maximum(abs.(Ki)) < 1e-14
     @test maximum(abs.(Mi - Ma)) == 0.0        # mass does not see the stiffness law
 
     # Nonlinear terms: same residual for the same input.
-    n = ndofs(dh)
-    f2l = Dict(d => d for d in 1:n)
+    n = ndofs(dof_handler)
+    dof_to_free = Dict(d => d for d in 1:n)
     for deg in (2, 3)
-        ti = svk_nonlinearity(deg, dh, cv, f2l, n,
-            SVK.SVKMaterial(E = _E, ν = _ν, ρ = _ρ); max_unique_cols = deg)
-        ta = svk_nonlinearity(deg, dh, cv, f2l, n, iso_crystal(); max_unique_cols = deg)
+        ti = svk_nonlinearity(deg, dof_handler, cell_values, dof_to_free,
+            n, SVK.SVKMaterial(E = _E, ν = _ν, ρ = _ρ))
+        ta = svk_nonlinearity(deg, dof_handler, cell_values, dof_to_free, n, iso_crystal())
         us = [randn(ComplexF64, n) for _ in 1:deg]
         ri = zeros(ComplexF64, n)
         ra = zeros(ComplexF64, n)

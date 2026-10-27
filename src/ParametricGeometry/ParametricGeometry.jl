@@ -106,20 +106,20 @@ include("diagnostics.jl")
 include("build_model.jl")
 
 export GeometryParameterBasis, nterms, jacobian_series, det_adj_series,
-	determinant_series, adjugate_series, position_of, complex_tensor_type,
-	reciprocal_series, inv_det_power, poly_mul, poly_dot, poly_contract,
-	poly_mul!, poly_dot!, poly_contract!, convolve_weight_accumulate!,
-	∇adj_series!, series_extent, Tens3, Tens3C, SymT3C,
-	PullbackCache, inv_det_power_series, adj_tensor_type,
-	AbstractInverseDeterminant, PowerSeriesInverseDet, AuxiliaryFieldInverseDet,
-	build_inverse_determinant,
-	AbstractPullbackKernel, QPContext, ∇adj_series,
-	det_weight_power, qp_prepare, qp_integrand!, linear_qp_series!,
-	ParametricDiscretisation, ParametricMap, multilinear_maps, sweep_all!, free_dof_map,
-	build_linear_corrections, assemble_linear_series!,
-	ParametricOperator, AssembledParametricModel, model_order, build_model,
-	zero_coefficient_report, report_zero_coefficients,
-	series_value, geometry_validity_at, geometry_validity_report,
-	report_geometry_validity, inverse_determinant_comparison
+       determinant_series, adjugate_series, position_of, complex_tensor_type,
+       reciprocal_series, inv_det_power, poly_mul, poly_dot, poly_contract,
+       poly_mul!, poly_dot!, poly_contract!, convolve_weight_accumulate!,
+       ∇adj_series!, series_extent, Tens3, Tens3C, SymT3C,
+       PullbackCache, inv_det_power_series, adj_tensor_type,
+       AbstractInverseDeterminant, PowerSeriesInverseDet, AuxiliaryFieldInverseDet,
+       build_inverse_determinant,
+       AbstractPullbackKernel, QPContext, ∇adj_series,
+       det_weight_power, qp_prepare, qp_integrand!, linear_qp_series!,
+       ParametricDiscretisation, ParametricMap, multilinear_maps, sweep_all!, free_dof_map,
+       build_linear_corrections, assemble_linear_series!,
+       ParametricOperator, AssembledParametricModel, model_order, build_model,
+       zero_coefficient_report, report_zero_coefficients,
+       series_value, geometry_validity_at, geometry_validity_report,
+       report_geometry_validity, inverse_determinant_comparison
 
 end # module ParametricGeometry

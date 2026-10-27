@@ -51,11 +51,12 @@ function _mm_space(grid)
     ip = Lagrange{RefHexahedron, 2}()^3
     # generate_grid makes LINEAR hexahedra, so the geometric map is trilinear and
     # a linear ψ is reproduced by node-moving exactly.
-    cv = CellValues(QuadratureRule{RefHexahedron}(3), ip, Lagrange{RefHexahedron, 1}())
-    dh = DofHandler(grid)
-    add!(dh, :u, ip)
-    close!(dh)
-    return dh, cv
+    cell_values = CellValues(QuadratureRule{RefHexahedron}(3), ip, Lagrange{
+        RefHexahedron, 1}())
+    dof_handler = DofHandler(grid)
+    add!(dof_handler, :u, ip)
+    close!(dof_handler)
+    return dof_handler, cell_values
 end
 
 # Same cells, displaced nodes ⇒ same topology ⇒ same DOF numbering.
@@ -67,42 +68,44 @@ end
 
 _mono(θ, α) = prod(θ[i]^α[i] for i in eachindex(α))
 _at(arr, basis, θ) = sum(_mono(θ, α) * arr[m] for (m, α) in enumerate(basis.mset.exponents))
-_cols_at(A, basis, θ) =
+function _cols_at(A, basis, θ)
     sum(_mono(θ, α) * view(A, :, m) for (m, α) in enumerate(basis.mset.exponents))
+end
 _relerr(a, b) = norm(a - b) / max(norm(b), eps())
 
 # Parametric operators and both nonlinear forms, plus the FOM reference at θ.
 function _mm_case(∇ψs, maxt, θ, u)
     grid = _base_grid()
-    dh, cv = _mm_space(grid)
+    dof_handler, cell_values = _mm_space(grid)
     basis = PGm.GeometryParameterBasis(fill(maxt, length(∇ψs)))
-    cache = PGm.PullbackCache(dh, cv, x -> (one(Tens3m), ∇ψs...), basis;
+    cache = PGm.PullbackCache(dof_handler, cell_values, x -> (one(Tens3m), ∇ψs...), basis;
         det_powers = [2, 3])
-    f2l = PGm.free_dof_map(ndofs(dh), 1:ndofs(dh))
-    pd = PGm.ParametricDiscretisation(dh, cv, f2l, ndofs(dh), cache)
+    dense_dof_to_free = PGm.free_dof_map(ndofs(dof_handler), 1:ndofs(dof_handler))
+    pd = PGm.ParametricDiscretisation(
+        dof_handler, cell_values, dense_dof_to_free, ndofs(dof_handler), cache)
 
     L = PGm.nterms(basis)
-    K = [allocate_matrix(dh) for _ in 1:L]
-    M = [allocate_matrix(dh) for _ in 1:L]
+    K = [allocate_matrix(dof_handler) for _ in 1:L]
+    M = [allocate_matrix(dof_handler) for _ in 1:L]
     PGm.assemble_linear_series!(K, M, pd, SVKm.SVKPullbackKernel{0}(_STRESS_M, _ρ_M))
 
     A = Dict{Int, Matrix{ComplexF64}}()
     for DEG in (2, 3)
         pm = PGm.ParametricMap(pd, SVKm.SVKPullbackKernel{DEG}(_STRESS_M, _ρ_M))
-        A[DEG] = PGm.sweep_all!(zeros(ComplexF64, ndofs(dh), L), pm, ntuple(_ -> u, DEG))
+        A[DEG] = PGm.sweep_all!(zeros(ComplexF64, ndofs(dof_handler), L), pm, ntuple(_ -> u, DEG))
     end
 
     # ── the independent reference: ordinary SVK on the moved mesh ──
-    dh_m, cv_m = _mm_space(_moved(grid, ∇ψs, θ))
-    Kr = allocate_matrix(dh_m)
-    Mr = allocate_matrix(dh_m)
-    SVKm.assemble_KM!(Kr, Mr, dh_m, cv_m, _STRESS_M, _ρ_M)
-    f2l_m = Dict(d => d for d in 1:ndofs(dh_m))
+    moved_dof_handler, moved_cell_values = _mm_space(_moved(grid, ∇ψs, θ))
+    Kr = allocate_matrix(moved_dof_handler)
+    Mr = allocate_matrix(moved_dof_handler)
+    SVKm.assemble_KM!(Kr, Mr, moved_dof_handler, moved_cell_values, _STRESS_M, _ρ_M)
+    moved_dof_to_free = Dict(d => d for d in 1:ndofs(moved_dof_handler))
     nl = Dict{Int, Vector{ComplexF64}}()
     for DEG in (2, 3)
-        term = SVKm.svk_nonlinearity(DEG, dh_m, cv_m, f2l_m, ndofs(dh_m), _λ_M, _μ_M;
-            max_unique_cols = DEG)
-        r = zeros(ComplexF64, ndofs(dh_m))
+        term = SVKm.svk_nonlinearity(DEG, moved_dof_handler, moved_cell_values,
+            moved_dof_to_free, ndofs(moved_dof_handler), _λ_M, _μ_M)
+        r = zeros(ComplexF64, ndofs(moved_dof_handler))
         MORFE.evaluate_term!(r, term, (u, u), nothing)
         nl[DEG] = r
     end

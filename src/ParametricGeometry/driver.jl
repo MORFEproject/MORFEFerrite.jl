@@ -21,49 +21,55 @@ A `Dict` here costs one hash lookup per DOF per cell **per θ-multiindex** —
 `scatter_local!` runs once for each of the `L` coefficients of every cell — which
 is a six-figure number of hashes per sweep for no reason. The dense vector is
 `4·ndofs` bytes and indexes directly. Physics modules outside this one keep their
-`Dict` form (`model.info.free_to_local`); only the parametric assembly path uses
+`Dict` form (`model.info.dof_to_free`); only the parametric assembly path uses
 this.
 """
 function free_dof_map(ndofs::Integer, freedofs)
-	v = zeros(Int32, ndofs)
-	@inbounds for (i, d) in enumerate(freedofs)
-		v[d] = Int32(i)
-	end
-	return v
+    v = zeros(Int32, ndofs)
+    @inbounds for (i, d) in enumerate(freedofs)
+        v[d] = Int32(i)
+    end
+    return v
 end
 
 @inline function gather_local!(ue::Vector{T}, u::AbstractVector{T},
-	dofs::Vector{Int}, free_to_local::Vector{Int32}) where {T}
-	@inbounds for (i, d) in pairs(dofs)
-		l = free_to_local[d]
-		ue[i] = iszero(l) ? zero(T) : u[l]
-	end
-	return ue
+        dofs::Vector{Int}, dof_to_free::Vector{Int32}) where {T}
+    @inbounds for (i, d) in pairs(dofs)
+        l = dof_to_free[d]
+        ue[i] = iszero(l) ? zero(T) : u[l]
+    end
+    return ue
 end
 
 @inline function scatter_local!(res::AbstractVector{T}, re::AbstractVector{T},
-	dofs::Vector{Int}, free_to_local::Vector{Int32}) where {T}
-	@inbounds for (i, d) in pairs(dofs)
-		l = free_to_local[d]
-		iszero(l) && continue
-		res[l] += re[i]
-	end
-	return res
+        dofs::Vector{Int}, dof_to_free::Vector{Int32}) where {T}
+    @inbounds for (i, d) in pairs(dofs)
+        l = dof_to_free[d]
+        iszero(l) && continue
+        res[l] += re[i]
+    end
+    return res
 end
 
 """
-	ParametricDiscretisation(dh, cv, free_to_local, n_free, cache)
+	ParametricDiscretisation(dof_handler, cell_values, dof_to_free, n_free, cache)
 
-The FE side of a parametric problem: the DOF handler and quadrature, the
-free-DOF restriction, and the [`PullbackCache`](@ref) for this geometry and
-θ-basis. Shared by every kernel over the same mesh.
+The FE side of a parametric problem, shared by every kernel over the same mesh:
+
+- `dof_handler`: the Ferrite `DofHandler` of the physics' field, over all DOFs.
+- `cell_values`: the Ferrite `CellValues` of that field and the quadrature rule; the
+  geometry series of `cache` live at its quadrature points.
+- `dof_to_free`: dense map from a global DOF number to its index in the free state
+  vector, `0` at a constrained DOF (see [`free_dof_map`](@ref)).
+- `n_free`: the number of free DOFs, the length of the state vector.
+- `cache`: the [`PullbackCache`](@ref) for this geometry and θ-basis.
 """
 struct ParametricDiscretisation{Nθ, TT, DH, CV}
-	dh::DH
-	cv::CV
-	free_to_local::Vector{Int32}
-	n_free::Int
-	cache::PullbackCache{Nθ, TT}
+    dof_handler::DH
+    cell_values::CV
+    dof_to_free::Vector{Int32}
+    n_free::Int
+    cache::PullbackCache{Nθ, TT}
 end
 
 basis(pd::ParametricDiscretisation) = pd.cache.basis
@@ -81,28 +87,28 @@ input tuple. The hit test is an exact content comparison (no hashing), so
 results are bit-identical to computing each coefficient separately.
 """
 struct ParametricMap{DEG, Nθ, PD, K}
-	pd::PD
-	kernel::K
-	u_store::NTuple{3, Vector{ComplexF64}}
-	res_all::Matrix{ComplexF64}      # n_free × nterms(basis)
-	valid::Base.RefValue{Bool}
+    pd::PD
+    kernel::K
+    u_store::NTuple{3, Vector{ComplexF64}}
+    res_all::Matrix{ComplexF64}      # n_free × nterms(basis)
+    valid::Base.RefValue{Bool}
 end
 
 function ParametricMap(pd::ParametricDiscretisation{Nθ},
-	kernel::AbstractPullbackKernel{DEG}) where {DEG, Nθ}
-	u_store = ntuple(_ -> ComplexF64[], 3)
-	res_all = zeros(ComplexF64, pd.n_free, nterms(pd))
-	return ParametricMap{DEG, Nθ, typeof(pd), typeof(kernel)}(
-		pd, kernel, u_store, res_all, Ref(false))
+        kernel::AbstractPullbackKernel{DEG}) where {DEG, Nθ}
+    u_store = ntuple(_ -> ComplexF64[], 3)
+    res_all = zeros(ComplexF64, pd.n_free, nterms(pd))
+    return ParametricMap{DEG, Nθ, typeof(pd), typeof(kernel)}(
+        pd, kernel, u_store, res_all, Ref(false))
 end
 
 Base.ndims(::ParametricMap{DEG}) where {DEG} = DEG
 
 function Base.show(io::IO, ::MIME"text/plain", m::ParametricMap{DEG, Nθ}) where {DEG, Nθ}
-	println(io, "ParametricMap{DEG=$DEG, Nθ=$Nθ}")
-	println(io, "  kernel   : $(nameof(typeof(m.kernel)))")
-	println(io, "  free DOFs: $(m.pd.n_free)")
-	print(io, "  θ-terms  : $(nterms(m.pd))")
+    println(io, "ParametricMap{DEG=$DEG, Nθ=$Nθ}")
+    println(io, "  kernel   : $(nameof(typeof(m.kernel)))")
+    println(io, "  free DOFs: $(m.pd.n_free)")
+    print(io, "  θ-terms  : $(nterms(m.pd))")
 end
 
 # --- the all-coefficients sweep --------------------------------------
@@ -116,82 +122,82 @@ Computing the whole series costs the same per coefficient as computing one, so
 this is the only sweep the per-α closures need.
 """
 function sweep_all!(out::Matrix{ComplexF64}, m::ParametricMap{DEG},
-	us::NTuple{DEG, <:AbstractVector}) where {DEG}
-	fill!(out, zero(ComplexF64))
-	pd = m.pd
-	cv = pd.cv
-	b = basis(pd)
-	L = nterms(pd)
-	nbf = getnbasefunctions(cv)
-	nd = ndofs_per_cell(pd.dh)
+        us::NTuple{DEG, <:AbstractVector}) where {DEG}
+    fill!(out, zero(ComplexF64))
+    pd = m.pd
+    cell_values = pd.cell_values
+    b = basis(pd)
+    L = nterms(pd)
+    nbf = getnbasefunctions(cell_values)
+    nd = ndofs_per_cell(pd.dof_handler)
 
-	ue = ntuple(_ -> zeros(ComplexF64, nd), DEG)
-	re = zeros(ComplexF64, nd, L)
-	integ = Vector{ComplexF64}(undef, L)
-	# Preallocated once per sweep, reused for every (cell, quadrature point,
-	# basis function). These used to be freshly allocated in the innermost loop.
-	# Element types come from the CACHE, not from a 3D alias — this is the one
-	# place the assembly loop would otherwise hardcode the dimension.
-	TT = adj_tensor_type(pd.cache)
-	∇N_adj = Vector{TT}(undef, L)
-	∇u_adj = ntuple(_ -> Vector{complex_tensor_type(TT)}(undef, L), DEG)
-	# Hoisted out of the cell loop: a Dict lookup has no business in the hot path.
-	invpow = inv_det_power_series(pd.cache, det_weight_power(m.kernel))
+    ue = ntuple(_ -> zeros(ComplexF64, nd), DEG)
+    re = zeros(ComplexF64, nd, L)
+    integ = Vector{ComplexF64}(undef, L)
+    # Preallocated once per sweep, reused for every (cell, quadrature point,
+    # basis function). These used to be freshly allocated in the innermost loop.
+    # Element types come from the CACHE, not from a 3D alias — this is the one
+    # place the assembly loop would otherwise hardcode the dimension.
+    TT = adj_tensor_type(pd.cache)
+    ∇N_adj = Vector{TT}(undef, L)
+    ∇u_adj = ntuple(_ -> Vector{complex_tensor_type(TT)}(undef, L), DEG)
+    # Hoisted out of the cell loop: a Dict lookup has no business in the hot path.
+    invpow = inv_det_power_series(pd.cache, det_weight_power(m.kernel))
 
-	for (ci, cell) in enumerate(CellIterator(pd.dh))
-		reinit!(cv, cell)
-		dofs = celldofs(cell)
-		for k in 1:DEG
-			gather_local!(ue[k], us[k], dofs, pd.free_to_local)
-		end
-		fill!(re, zero(ComplexF64))
-		for q in 1:getnquadpoints(cv)
-			dΩ₀ = getdetJdV(cv, q)
-			adj_ser = pd.cache.adj[ci][q]
-			wser_det = invpow[ci][q]
-			ctx = QPContext(cv, q, b, adj_ser, pd.cache.det[ci][q],
-				pd.cache.inv_det[ci][q])
+    for (ci, cell) in enumerate(CellIterator(pd.dof_handler))
+        reinit!(cell_values, cell)
+        dofs = celldofs(cell)
+        for k in 1:DEG
+            gather_local!(ue[k], us[k], dofs, pd.dof_to_free)
+        end
+        fill!(re, zero(ComplexF64))
+        for q in 1:getnquadpoints(cell_values)
+            dΩ₀ = getdetJdV(cell_values, q)
+            adj_ser = pd.cache.adj[ci][q]
+            wser_det = invpow[ci][q]
+            ctx = QPContext(cell_values, q, b, adj_ser, pd.cache.det[ci][q],
+                pd.cache.inv_det[ci][q])
 
-			for k in 1:DEG
-				∇adj_series!(∇u_adj[k], function_gradient(cv, q, ue[k]), adj_ser)
-			end
-			state = qp_prepare(m.kernel, ctx, ∇u_adj)
+            for k in 1:DEG
+                ∇adj_series!(∇u_adj[k], function_gradient(cell_values, q, ue[k]), adj_ser)
+            end
+            state = qp_prepare(m.kernel, ctx, ∇u_adj)
 
-			for I in 1:nbf
-				∇adj_series!(∇N_adj, shape_gradient(cv, q, I), adj_ser)
-				qp_integrand!(integ, m.kernel, ctx, state, ∇N_adj)
-				# Fused: weight by (1/det J)^p straight into the element residual,
-				# instead of building a length-L temporary per basis function.
-				convolve_weight_accumulate!(view(re, I, :), integ, wser_det, dΩ₀, b)
-			end
-		end
-		for mα in 1:L
-			scatter_local!(view(out, :, mα), view(re, :, mα), dofs, pd.free_to_local)
-		end
-	end
-	return out
+            for I in 1:nbf
+                ∇adj_series!(∇N_adj, shape_gradient(cell_values, q, I), adj_ser)
+                qp_integrand!(integ, m.kernel, ctx, state, ∇N_adj)
+                # Fused: weight by (1/det J)^p straight into the element residual,
+                # instead of building a length-L temporary per basis function.
+                convolve_weight_accumulate!(view(re, I, :), integ, wser_det, dΩ₀, b)
+            end
+        end
+        for mα in 1:L
+            scatter_local!(view(out, :, mα), view(re, :, mα), dofs, pd.dof_to_free)
+        end
+    end
+    return out
 end
 
 @inline function _store!(dst::Vector{ComplexF64}, src::AbstractVector)
-	resize!(dst, length(src))
-	copyto!(dst, src)
-	return dst
+    resize!(dst, length(src))
+    copyto!(dst, src)
+    return dst
 end
 
 function _ensure!(m::ParametricMap{DEG}, us::NTuple{DEG, <:AbstractVector}) where {DEG}
-	if m.valid[]
-		hit = true
-		for k in 1:DEG
-			m.u_store[k] == us[k] || (hit = false; break)
-		end
-		hit && return m.res_all
-	end
-	for k in 1:DEG
-		_store!(m.u_store[k], us[k])
-	end
-	sweep_all!(m.res_all, m, us)
-	m.valid[] = true
-	return m.res_all
+    if m.valid[]
+        hit = true
+        for k in 1:DEG
+            m.u_store[k] == us[k] || (hit = false; break)
+        end
+        hit && return m.res_all
+    end
+    for k in 1:DEG
+        _store!(m.u_store[k], us[k])
+    end
+    sweep_all!(m.res_all, m, us)
+    m.valid[] = true
+    return m.res_all
 end
 
 # --- external-state factor: expand α into a component list ----------
@@ -199,12 +205,12 @@ end
 _expand_multiindex(α) = _expand_multiindex(α, collect(eachindex(α)))
 
 function _expand_multiindex(α, external_components)
-	length(external_components) == length(α) || throw(ArgumentError(
-		"external_components has length $(length(external_components)); expected $(length(α))"))
-	all(>(0), external_components) || throw(ArgumentError(
-		"external component indices must be positive"))
-	return Tuple(reduce(vcat,
-		[fill(external_components[i], α[i]) for i in eachindex(α)]; init = Int[]))
+    length(external_components) == length(α) || throw(ArgumentError(
+        "external_components has length $(length(external_components)); expected $(length(α))"))
+    all(>(0), external_components) || throw(ArgumentError(
+        "external component indices must be positive"))
+    return Tuple(reduce(vcat,
+        [fill(external_components[i], α[i]) for i in eachindex(α)]; init = Int[]))
 end
 
 # --- fixed-arity closure factories ----------------------------------
@@ -214,22 +220,22 @@ end
 const _PG_MAX_EXT = 12   # ≥ largest total θ-degree used
 
 for deg in 2:3, mm in 0:_PG_MAX_EXT
-	fields = [Symbol("u$i") for i in 1:deg]
-	ext = [Symbol("r$i") for i in 1:mm]
-	if mm == 0
-		@eval _pg_form(::Val{$deg}, ::Val{0}, comp, pm, αidx) =
-			(res, $(fields...)) -> begin
-				A = _ensure!(pm, ($(fields...),))
-				res .-= view(A, :, αidx)
-			end
-	else
-		factor = Expr(:call, :*, [:($(ext[s])[comp[$s]]) for s in 1:mm]...)
-		@eval _pg_form(::Val{$deg}, ::Val{$mm}, comp, pm, αidx) =
-			(res, $(fields...), $(ext...)) -> begin
-				A = _ensure!(pm, ($(fields...),))
-				res .-= ($factor) .* view(A, :, αidx)
-			end
-	end
+
+    fields = [Symbol("u$i") for i in 1:deg]
+    ext = [Symbol("r$i") for i in 1:mm]
+    if mm == 0
+        @eval _pg_form(::Val{$deg}, ::Val{0}, comp, pm, αidx) = (res, $(fields...)) -> begin
+            A = _ensure!(pm, ($(fields...),))
+            res .-= view(A, :, αidx)
+        end
+    else
+        factor = Expr(:call, :*, [:($(ext[s])[comp[$s]]) for s in 1:mm]...)
+        @eval _pg_form(::Val{$deg}, ::Val{$mm}, comp, pm, αidx) = (
+            res, $(fields...), $(ext...)) -> begin
+            A = _ensure!(pm, ($(fields...),))
+            res .-= ($factor) .* view(A, :, αidx)
+        end
+    end
 end
 
 """
@@ -244,17 +250,18 @@ acts on. For a second-order structure with the augmented `ORD = 3` model, a
 quadratic displacement form is `(2, 0, 0)`.
 """
 function multilinear_maps(m::ParametricMap{DEG}; arity::NTuple{N, Int},
-	external_components = collect(1:length(basis(m.pd).mset.exponents[1]))) where {DEG, N}
-	sum(arity) == DEG || throw(ArgumentError(
-		"arity $arity sums to $(sum(arity)) but this kernel has field arity DEG = $DEG"))
-	maps = MultilinearMap[]
-	for (αidx, α) in enumerate(basis(m.pd).mset.exponents)
-		mm = sum(α)
-		mm <= _PG_MAX_EXT || throw(ArgumentError(
-			"θ-multiindex $α has total degree $mm > _PG_MAX_EXT = $_PG_MAX_EXT"))
-		cl = Base.invokelatest(_pg_form, Val(DEG), Val(mm),
-			_expand_multiindex(α, external_components), m, αidx)
-		push!(maps, MultilinearMap(cl, arity, mm))
-	end
-	return maps
+        external_components = collect(1:length(basis(m.pd).mset.exponents[1]))) where {
+        DEG, N}
+    sum(arity) == DEG || throw(ArgumentError(
+        "arity $arity sums to $(sum(arity)) but this kernel has field arity DEG = $DEG"))
+    maps = MultilinearMap[]
+    for (αidx, α) in enumerate(basis(m.pd).mset.exponents)
+        mm = sum(α)
+        mm <= _PG_MAX_EXT || throw(ArgumentError(
+            "θ-multiindex $α has total degree $mm > _PG_MAX_EXT = $_PG_MAX_EXT"))
+        cl = Base.invokelatest(_pg_form, Val(DEG), Val(mm),
+            _expand_multiindex(α, external_components), m, αidx)
+        push!(maps, MultilinearMap(cl, arity, mm))
+    end
+    return maps
 end

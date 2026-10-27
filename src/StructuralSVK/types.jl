@@ -65,8 +65,8 @@ operators are `K`, `C`, and `M`; its FEM multilinear maps accumulate the negativ
 quadratic and cubic internal forces, so MORFE's model form represents
 `M*ü + C*u̇ + K*u + f_int,nl(u) = f_ext`.
 
-`term_factory(degree, max_cols)` lazily creates the degree-`2` or degree-`3`
-`MORFE.FEMMultilinearMap{2}` with storage for `max_cols` batched columns.
+`term_factory(degree)` lazily creates the degree-`2` or degree-`3`
+`MORFE.FEMMultilinearMap{2}`.
 `material`, `damping`, and `info` retain backend data used by eigensolvers,
 post-processing, and summaries.
 
@@ -106,8 +106,10 @@ function Base.getproperty(m::AssembledMechanicalModel, s::Symbol)
     return getfield(m, s)
 end
 
-Base.propertynames(::AssembledMechanicalModel, private::Bool = false) = (:B, :term_factory,
-    :nonlinear_degrees, :material, :damping, :info, :K, :C, :M)
+function Base.propertynames(::AssembledMechanicalModel, private::Bool = false)
+    (:B, :term_factory,
+        :nonlinear_degrees, :material, :damping, :info, :K, :C, :M)
+end
 
 _material_summary(m) = "SVK  E=$(m.E)  ν=$(m.ν)  ρ=$(m.ρ)"
 
@@ -128,8 +130,7 @@ function Common.summary_entries(m::AssembledMechanicalModel, meta::NamedTuple)
         "material" => _material_summary(m.material),
         "damping" => "Rayleigh  α=$(m.damping.α)  β=$(m.damping.β)",
         "master_pairs" => master,
-        "master_eigenvalues" => meta.spectrum.eigenvalues[meta.master_indices],
-        "n_monomials" => meta.n_monomials
+        "master_eigenvalues" => meta.spectrum.eigenvalues[meta.master_indices]
     ]
     isempty(meta.forcings) ? push!(rows, "forcing" => "none (autonomous)") :
     push!(rows,

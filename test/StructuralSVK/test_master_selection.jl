@@ -41,22 +41,23 @@ function _reference_rom(master::Vector{Int}, order::Int, nev::Int)
     grid = _sel_grid()
     ip = Lagrange{RefHexahedron, 2}()^3
     qr = QuadratureRule{RefHexahedron}(3)
-    cv = CellValues(qr, ip)
-    dh = DofHandler(grid)
-    add!(dh, :u, ip)
-    close!(dh)
-    ch = ConstraintHandler(dh)
-    add!(ch, Dirichlet(:u, getfacetset(grid, "Dirichlet"), (x, t) -> zeros(3), [1, 2, 3]))
-    close!(ch)
-    update!(ch, 0.0)
+    cell_values = CellValues(qr, ip)
+    dof_handler = DofHandler(grid)
+    add!(dof_handler, :u, ip)
+    close!(dof_handler)
+    constraints = ConstraintHandler(dof_handler)
+    add!(constraints, Dirichlet(:u, getfacetset(grid, "Dirichlet"), (x, t) -> zeros(3), [
+        1, 2, 3]))
+    close!(constraints)
+    update!(constraints, 0.0)
 
     λm = (_sE * _sν) / ((1 + _sν) * (1 - 2_sν))
     μm = _sE / (2(1 + _sν))
-    K_full = allocate_matrix(dh)
-    M_full = allocate_matrix(dh)
-    svk_assemble_KM!(K_full, M_full, dh, cv, λm, μm, _sρ)
-    free = sort(setdiff(1:ndofs(dh), ch.prescribed_dofs))
-    free_to_local = Dict(d => i for (i, d) in enumerate(free))
+    K_full = allocate_matrix(dof_handler)
+    M_full = allocate_matrix(dof_handler)
+    svk_assemble_KM!(K_full, M_full, dof_handler, cell_values, λm, μm, _sρ)
+    free = sort(setdiff(1:ndofs(dof_handler), constraints.prescribed_dofs))
+    dof_to_free = Dict(d => i for (i, d) in enumerate(free))
     n_free = length(free)
     K = K_full[free, free]
     M = M_full[free, free]
@@ -65,10 +66,8 @@ function _reference_rom(master::Vector{Int}, order::Int, nev::Int)
     ROM = 2 * length(master)
     mset = all_multiindices_up_to(ROM, order; min_degree = 1)
     terms = (
-        svk_nonlinearity(2, dh, cv, free_to_local, n_free, λm, μm;
-            max_unique_cols = length(mset)),
-        svk_nonlinearity(3, dh, cv, free_to_local, n_free, λm, μm;
-            max_unique_cols = length(mset))
+        svk_nonlinearity(2, dof_handler, cell_values, dof_to_free, n_free, λm, μm),
+        svk_nonlinearity(3, dof_handler, cell_values, dof_to_free, n_free, λm, μm)
     )
     model = NthOrderModel((K, C, M), terms)
 
@@ -180,22 +179,24 @@ end
 
 @testset "node → DOF lookups" begin
     beam = _sel_model()
-    dh = beam.info.dh
-    ftl = beam.info.free_to_local
+    dof_handler = beam.info.dof_handler
+    dof_to_free = beam.info.dof_to_free
 
     # An interior node's three DOFs are distinct, free, and consistent between
     # the global and the free-DOF views.
-    interior = findfirst(n -> 40.0 < n.x[1] < 60.0, dh.grid.nodes)
+    interior = findfirst(n -> 40.0 < n.x[1] < 60.0, dof_handler.grid.nodes)
     @test interior !== nothing
-    g = [MORFEFerrite.node_dof(dh, interior, d) for d in 1:3]
+    g = [MORFEFerrite.node_dof(dof_handler, interior, d) for d in 1:3]
     @test length(unique(g)) == 3
-    f = MORFEFerrite.free_dofs_at_nodes(dh, ftl, fill(interior, 3), [1, 2, 3])
-    @test f == [ftl[gi] for gi in g]
+    f = MORFEFerrite.free_dofs_at_nodes(dof_handler, dof_to_free, fill(interior, 3), [
+        1, 2, 3])
+    @test f == [dof_to_free[gi] for gi in g]
     @test all(1 .<= f .<= beam.info.n_dofs)
 
-    @test_throws ArgumentError MORFEFerrite.node_dof(dh, interior, 4)
-    @test_throws ArgumentError MORFEFerrite.free_dofs_at_nodes(dh, ftl, [interior], [1, 2])
+    @test_throws ArgumentError MORFEFerrite.node_dof(dof_handler, interior, 4)
+    @test_throws ArgumentError MORFEFerrite.free_dofs_at_nodes(dof_handler, dof_to_free, [interior], [
+        1, 2])
     # A clamped node (x = 0) has no free-DOF row.
-    clamped = findfirst(n -> abs(n.x[1]) < 1e-8, dh.grid.nodes)
-    @test_throws ArgumentError MORFEFerrite.free_dofs_at_nodes(dh, ftl, [clamped], [1])
+    clamped = findfirst(n -> abs(n.x[1]) < 1e-8, dof_handler.grid.nodes)
+    @test_throws ArgumentError MORFEFerrite.free_dofs_at_nodes(dof_handler, dof_to_free, [clamped], [1])
 end

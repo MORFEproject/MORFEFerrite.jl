@@ -27,7 +27,7 @@ function spectrum(m::AssembledMechanicalModel; nev::Int = 10, eigensolver = noth
            spectrum(m.K, m.M, solver; sorter! = (args...) -> nothing) :
            spectrum(
         NthOrderModel(m.B,
-            Tuple(m.term_factory(d, 1) for d in m.nonlinear_degrees));
+            Tuple(m.term_factory(d) for d in m.nonlinear_degrees));
         solver = solver, sorter! = (args...) -> nothing)
 end
 
@@ -65,7 +65,7 @@ Throws if the node is constrained, since a constrained DOF has no row. Wraps
 [`Common.free_dofs_at_nodes`](@ref) for the single-node case.
 """
 function probe_dof(m::AssembledMechanicalModel, node::Integer, direction::Integer)
-    return only(Common.free_dofs_at_nodes(m.info.dh, m.info.free_to_local,
+    return only(Common.free_dofs_at_nodes(m.info.dof_handler, m.info.dof_to_free,
         [Int(node)], [Int(direction)]))
 end
 

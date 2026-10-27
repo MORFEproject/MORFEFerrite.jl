@@ -44,12 +44,12 @@ Assemble the quadratic perturbation convection into `accum` (length n_free_dpim)
     accum[k] += −∫_Ω  φᵢ · (∇u · u)  dΩ     (velocity DOFs k only)
 
 where u is the velocity part of `s_free` extracted element-by-element via
-`fom.free_to_local_dpim`.  `accum` is zeroed on entry.
+`fom.dof_to_free_dpim`.  `accum` is zeroed on entry.
 """
 function eval_perturbation_convection!(
-    accum::Vector{Float64},
-    s_free::Vector{Float64},
-    fom,
+        accum::Vector{Float64},
+        s_free::Vector{Float64},
+        fom
 )
     _eval_perturbation_convection_pair!(accum, s_free, s_free, fom)
     return nothing
@@ -95,16 +95,16 @@ Advance `s` in place by `n_steps` IMEX steps:
 storage, norm tracking).  Returns `false` on blow-up (non-finite state).
 """
 function integrate_orbit!(
-    s::Vector{Float64},
-    n_steps::Int,
-    η_prime::Float64,
-    fom,
-    L_klu,
-    RHS_M::AbstractMatrix,
-    h₀_vec::Vector{Float64},
-    f2::Vector{Float64},
-    rhs::Vector{Float64};
-    on_step = nothing,
+        s::Vector{Float64},
+        n_steps::Int,
+        η_prime::Float64,
+        fom,
+        L_klu,
+        RHS_M::AbstractMatrix,
+        h₀_vec::Vector{Float64},
+        f2::Vector{Float64},
+        rhs::Vector{Float64};
+        on_step = nothing
 )
     for step in 1:n_steps
         eval_perturbation_convection!(f2, s, fom)
@@ -164,36 +164,36 @@ Fast components only correlate at their own short lags, outside the gated
 window, so the autocorrelation peak stays on the shedding period.
 """
 function _estimate_period_autocorr(signal::Vector{Float64}, dt::Float64,
-		τ_min::Float64, τ_max::Float64)
-	n = length(signal)
-	k_min = max(1, floor(Int, τ_min / dt))
-	k_max = min(n - 2, ceil(Int, τ_max / dt))
-	k_max <= k_min + 1 && return NaN, 0.0
+        τ_min::Float64, τ_max::Float64)
+    n = length(signal)
+    k_min = max(1, floor(Int, τ_min / dt))
+    k_max = min(n - 2, ceil(Int, τ_max / dt))
+    k_max <= k_min + 1 && return NaN, 0.0
 
-	c = fill(-Inf, k_max)
-	for k in k_min:k_max
-		num = 0.0
-		d1 = 0.0
-		d2 = 0.0
-		@inbounds for i in 1:(n - k)
-			num += signal[i] * signal[i+k]
-			d1 += signal[i]^2
-			d2 += signal[i+k]^2
-		end
-		den = sqrt(d1 * d2)
-		c[k] = den > 0.0 ? num / den : -Inf
-	end
+    c = fill(-Inf, k_max)
+    for k in k_min:k_max
+        num = 0.0
+        d1 = 0.0
+        d2 = 0.0
+        @inbounds for i in 1:(n - k)
+            num += signal[i] * signal[i + k]
+            d1 += signal[i]^2
+            d2 += signal[i + k]^2
+        end
+        den = sqrt(d1 * d2)
+        c[k] = den > 0.0 ? num / den : -Inf
+    end
 
-	k_star = k_min
-	for k in (k_min+1):k_max
-		c[k] > c[k_star] && (k_star = k)
-	end
-	(k_star == k_min || k_star == k_max) && return NaN, 0.0
+    k_star = k_min
+    for k in (k_min + 1):k_max
+        c[k] > c[k_star] && (k_star = k)
+    end
+    (k_star == k_min || k_star == k_max) && return NaN, 0.0
 
-	cm, c0, cp = c[k_star-1], c[k_star], c[k_star+1]
-	curv = cm - 2c0 + cp
-	δ = curv < 0.0 ? 0.5 * (cm - cp) / curv : 0.0
-	return (k_star + δ) * dt, c0
+    cm, c0, cp = c[k_star - 1], c[k_star], c[k_star + 1]
+    curv = cm - 2c0 + cp
+    δ = curv < 0.0 ? 0.5 * (cm - cp) / curv : 0.0
+    return (k_star + δ) * dt, c0
 end
 
 """
@@ -237,154 +237,156 @@ probe.
 - `converged` : `true` if tolerance was met before `max_picard` was reached
 """
 function find_periodic_orbit(
-	s_guess::Vector{Float64},
-	η_prime::Float64,
-	T::Float64,
-	fom,
-	B₀, B₁,
-	K_visc,
-	h₀_vec::Vector{Float64};
-	Δt::Float64 = 5e-4,
-	θ::Float64 = 0.5,
-	n_spinup::Int = 3,
-	γ_spinup::Float64 = 0.0,
-	max_picard::Int = 400,
-	tol::Float64 = 1e-4,
-	lift_weights::Union{Vector{Float64}, Nothing} = nothing,
-	verbose::Bool = false,
+        s_guess::Vector{Float64},
+        η_prime::Float64,
+        T::Float64,
+        fom,
+        B₀, B₁,
+        K_visc,
+        h₀_vec::Vector{Float64};
+        Δt::Float64 = 5e-4,
+        θ::Float64 = 0.5,
+        n_spinup::Int = 3,
+        γ_spinup::Float64 = 0.0,
+        max_picard::Int = 400,
+        tol::Float64 = 1e-4,
+        lift_weights::Union{Vector{Float64}, Nothing} = nothing,
+        verbose::Bool = false
 )
-	T_seed = T   # ROM period — all period updates are gated to [0.5, 2]·T_seed
-	s = copy(s_guess)
-	f2 = similar(s)
-	rhs = similar(s)
-	tmp = similar(s)
-	total_orbits = 0
+    T_seed = T   # ROM period — all period updates are gated to [0.5, 2]·T_seed
+    s = copy(s_guess)
+    f2 = similar(s)
+    rhs = similar(s)
+    tmp = similar(s)
+    total_orbits = 0
 
-	# ── Phase 1: undamped spin-up (γ_spinup > 0 only for pathological seeds) ─
-	if n_spinup > 0
-		L_su, RHS_su, _, n_steps = build_imex_operators(
-			B₀, B₁, K_visc, η_prime, T, Δt; θ, γ = γ_spinup)
-		for orbit in 1:n_spinup
-			ok = integrate_orbit!(s, n_steps, η_prime, fom, L_su, RHS_su,
-				h₀_vec, f2, rhs)
-			if !ok
-				@warn "find_periodic_orbit: blow-up during spin-up orbit " *
-					  "$orbit/$n_spinup — decrease Δt (or set γ_spinup ~ σ)"
-				return s, T, NaN, NaN, NaN, total_orbits + orbit, false
-			end
-			verbose && @printf("  spin-up %3d/%3d  ‖s‖ = %.3e\n",
-				orbit, n_spinup, sqrt(max(dot(s, s), 0.0)))
-		end
-		total_orbits += n_spinup
-	end
+    # ── Phase 1: undamped spin-up (γ_spinup > 0 only for pathological seeds) ─
+    if n_spinup > 0
+        L_su, RHS_su, _, n_steps = build_imex_operators(
+            B₀, B₁, K_visc, η_prime, T, Δt; θ, γ = γ_spinup)
+        for orbit in 1:n_spinup
+            ok = integrate_orbit!(s, n_steps, η_prime, fom, L_su, RHS_su,
+                h₀_vec, f2, rhs)
+            if !ok
+                @warn "find_periodic_orbit: blow-up during spin-up orbit " *
+                      "$orbit/$n_spinup — decrease Δt (or set γ_spinup ~ σ)"
+                return s, T, NaN, NaN, NaN, total_orbits + orbit, false
+            end
+            verbose && @printf("  spin-up %3d/%3d  ‖s‖ = %.3e\n",
+                orbit, n_spinup, sqrt(max(dot(s, s), 0.0)))
+        end
+        total_orbits += n_spinup
+    end
 
-	L_klu, RHS_M, Δt_exact, n_steps = build_imex_operators(
-		B₀, B₁, K_visc, η_prime, T, Δt; θ)
+    L_klu, RHS_M, Δt_exact, n_steps = build_imex_operators(
+        B₀, B₁, K_visc, η_prime, T, Δt; θ)
 
-	# ── Phase 2: period-estimation probe (3×T_ROM, mean-subtracted lift) ─────
-	if lift_weights !== nothing
-		n_probe = 3 * n_steps
-		F_L_probe = Vector{Float64}(undef, n_probe)
-		record = (k, sv) -> (F_L_probe[k] = dot(lift_weights, sv))
-		ok = integrate_orbit!(s, n_probe, η_prime, fom, L_klu, RHS_M,
-			h₀_vec, f2, rhs; on_step = record)
-		if ok
-			total_orbits += 3
-			F_L_probe .-= sum(F_L_probe) / n_probe   # correlate the oscillation, not the offset
-			T_probe, c_peak = _estimate_period_autocorr(
-				F_L_probe, Δt_exact, 0.5 * T_seed, 2.0 * T_seed)
-			if isfinite(T_probe) && c_peak > 0.5
-				verbose && @printf("  period probe: T_ROM=%.6f → T_fom=%.6f  (peak corr %.3f)\n",
-					T, T_probe, c_peak)
-				T = T_probe
-				L_klu, RHS_M, Δt_exact, n_steps = build_imex_operators(
-					B₀, B₁, K_visc, η_prime, T, Δt; θ)
-			else
-				@warn "find_periodic_orbit: period probe rejected " *
-					  "(T_probe = $T_probe, peak corr = $c_peak) — keeping T_ROM = $T_seed"
-			end
-		else
-			@warn "find_periodic_orbit: blow-up during period-estimation probe"
-			return s, T, NaN, NaN, NaN, total_orbits, false
-		end
-	end
+    # ── Phase 2: period-estimation probe (3×T_ROM, mean-subtracted lift) ─────
+    if lift_weights !== nothing
+        n_probe = 3 * n_steps
+        F_L_probe = Vector{Float64}(undef, n_probe)
+        record = (k, sv) -> (F_L_probe[k] = dot(lift_weights, sv))
+        ok = integrate_orbit!(s, n_probe, η_prime, fom, L_klu, RHS_M,
+            h₀_vec, f2, rhs; on_step = record)
+        if ok
+            total_orbits += 3
+            F_L_probe .-= sum(F_L_probe) / n_probe   # correlate the oscillation, not the offset
+            T_probe, c_peak = _estimate_period_autocorr(
+                F_L_probe, Δt_exact, 0.5 * T_seed, 2.0 * T_seed)
+            if isfinite(T_probe) && c_peak > 0.5
+                verbose &&
+                    @printf("  period probe: T_ROM=%.6f → T_fom=%.6f  (peak corr %.3f)\n",
+                        T, T_probe, c_peak)
+                T = T_probe
+                L_klu, RHS_M, Δt_exact, n_steps = build_imex_operators(
+                    B₀, B₁, K_visc, η_prime, T, Δt; θ)
+            else
+                @warn "find_periodic_orbit: period probe rejected " *
+                      "(T_probe = $T_probe, peak corr = $c_peak) — keeping T_ROM = $T_seed"
+            end
+        else
+            @warn "find_periodic_orbit: blow-up during period-estimation probe"
+            return s, T, NaN, NaN, NaN, total_orbits, false
+        end
+    end
 
-	# ── Phase 3: undamped Picard with tangent-projection period refinement ──
-	E_norm = NaN
-	X_max = NaN
-	μ̂ = NaN            # transversal Floquet multiplier from residual ratios
-	E_norm_prev = NaN
-	T_rebuilt = true   # residual ratios are only μ when T was NOT rebuilt between the orbits
-	s_prev = similar(s)   # state one step before the orbit end → ṡ estimate
-	E = similar(s)
+    # ── Phase 3: undamped Picard with tangent-projection period refinement ──
+    E_norm = NaN
+    X_max = NaN
+    μ̂ = NaN            # transversal Floquet multiplier from residual ratios
+    E_norm_prev = NaN
+    T_rebuilt = true   # residual ratios are only μ when T was NOT rebuilt between the orbits
+    s_prev = similar(s)   # state one step before the orbit end → ṡ estimate
+    E = similar(s)
 
-	for orbit in 1:max_picard
-		s_start = copy(s)
-		X_max = 0.0
-		track = function (k, sv)
-			mul!(tmp, B₁, sv)
-			X_max = max(X_max, sqrt(max(dot(sv, tmp), 0.0)))
-			k == n_steps - 1 && (s_prev .= sv)
-			return nothing
-		end
+    for orbit in 1:max_picard
+        s_start = copy(s)
+        X_max = 0.0
+        track = function (k, sv)
+            mul!(tmp, B₁, sv)
+            X_max = max(X_max, sqrt(max(dot(sv, tmp), 0.0)))
+            k == n_steps - 1 && (s_prev .= sv)
+            return nothing
+        end
 
-		ok = integrate_orbit!(s, n_steps, η_prime, fom, L_klu, RHS_M,
-			h₀_vec, f2, rhs; on_step = track)
-		if !ok
-			@warn "find_periodic_orbit: blow-up during Picard orbit $orbit"
-			return s_start, T, NaN, NaN, NaN, total_orbits + orbit, false
-		end
+        ok = integrate_orbit!(s, n_steps, η_prime, fom, L_klu, RHS_M,
+            h₀_vec, f2, rhs; on_step = track)
+        if !ok
+            @warn "find_periodic_orbit: blow-up during Picard orbit $orbit"
+            return s_start, T, NaN, NaN, NaN, total_orbits + orbit, false
+        end
 
-		E .= s .- s_start
-		mul!(tmp, B₁, E)
-		E_norm = sqrt(max(dot(E, tmp), 0.0))
-		rel = X_max > 0.0 ? E_norm / X_max : NaN
+        E .= s .- s_start
+        mul!(tmp, B₁, E)
+        E_norm = sqrt(max(dot(E, tmp), 0.0))
+        rel = X_max > 0.0 ? E_norm / X_max : NaN
 
-		if !T_rebuilt && isfinite(E_norm_prev) && E_norm_prev > 0.0
-			ratio = E_norm / E_norm_prev
-			0.0 < ratio < 1.0 && (μ̂ = ratio)
-		end
-		E_norm_prev = E_norm
-		T_rebuilt = false
+        if !T_rebuilt && isfinite(E_norm_prev) && E_norm_prev > 0.0
+            ratio = E_norm / E_norm_prev
+            0.0 < ratio < 1.0 && (μ̂ = ratio)
+        end
+        E_norm_prev = E_norm
+        T_rebuilt = false
 
-		# Near the cycle the residual is dominated by phase drift (T off by δ):
-		# Φ_T(s*) ≈ s* + (T − T_exact)·ṡ  ⇒  T_exact ≈ T − ⟨ṡ,E⟩_M/⟨ṡ,ṡ⟩_M.
-		# Compute δT BEFORE the convergence check so the returned period is
-		# always FOM-measured — even when the seed period was already accurate
-		# enough for the residual to pass tol on the first orbit.
-		δT = 0.0
-		if isfinite(rel) && rel < 5e-2 && n_steps > 1
-			@. s_prev = (s - s_prev) / Δt_exact   # s_prev ← ṡ(T)
-			mul!(rhs, B₁, E)
-			num = dot(s_prev, rhs)
-			mul!(rhs, B₁, s_prev)
-			den = dot(s_prev, rhs)
-			den > 0.0 && (δT = num / den)
-		end
+        # Near the cycle the residual is dominated by phase drift (T off by δ):
+        # Φ_T(s*) ≈ s* + (T − T_exact)·ṡ  ⇒  T_exact ≈ T − ⟨ṡ,E⟩_M/⟨ṡ,ṡ⟩_M.
+        # Compute δT BEFORE the convergence check so the returned period is
+        # always FOM-measured — even when the seed period was already accurate
+        # enough for the residual to pass tol on the first orbit.
+        δT = 0.0
+        if isfinite(rel) && rel < 5e-2 && n_steps > 1
+            @. s_prev = (s - s_prev) / Δt_exact   # s_prev ← ṡ(T)
+            mul!(rhs, B₁, E)
+            num = dot(s_prev, rhs)
+            mul!(rhs, B₁, s_prev)
+            den = dot(s_prev, rhs)
+            den > 0.0 && (δT = num / den)
+        end
 
-		verbose && @printf("  Picard %3d  ‖E‖_M = %.3e  X_max = %.3e  rel = %.3e  T = %.6f  δT = %+.2e\n",
-			total_orbits + orbit, E_norm, X_max, rel, T, δT)
+        verbose &&
+            @printf("  Picard %3d  ‖E‖_M = %.3e  X_max = %.3e  rel = %.3e  T = %.6f  δT = %+.2e\n",
+                total_orbits + orbit, E_norm, X_max, rel, T, δT)
 
-		if isfinite(rel) && rel < tol
-			T = clamp(T - δT, 0.5 * T_seed, 2.0 * T_seed)   # final phase-drift removal
-			verbose && @printf("  converged: T_fom = %.8f  (final δT = %+.3e s)\n", T, δT)
-			return s_start, T, E_norm, X_max, μ̂, total_orbits + orbit, true
-		end
+        if isfinite(rel) && rel < tol
+            T = clamp(T - δT, 0.5 * T_seed, 2.0 * T_seed)   # final phase-drift removal
+            verbose && @printf("  converged: T_fom = %.8f  (final δT = %+.3e s)\n", T, δT)
+            return s_start, T, E_norm, X_max, μ̂, total_orbits + orbit, true
+        end
 
-		if δT != 0.0
-			T_new = clamp(T - δT, 0.5 * T_seed, 2.0 * T_seed)
-			if abs(T_new - T) > 1e-10 * T
-				T = T_new
-				L_klu, RHS_M, Δt_exact, n_steps = build_imex_operators(
-					B₀, B₁, K_visc, η_prime, T, Δt; θ)
-				T_rebuilt = true
-			end
-		end
-	end
+        if δT != 0.0
+            T_new = clamp(T - δT, 0.5 * T_seed, 2.0 * T_seed)
+            if abs(T_new - T) > 1e-10 * T
+                T = T_new
+                L_klu, RHS_M, Δt_exact, n_steps = build_imex_operators(
+                    B₀, B₁, K_visc, η_prime, T, Δt; θ)
+                T_rebuilt = true
+            end
+        end
+    end
 
-	@warn "find_periodic_orbit: did not converge in $(total_orbits + max_picard) orbits " *
-		  "(rel = $(X_max > 0 ? E_norm/X_max : NaN))"
-	return s, T, E_norm, X_max, μ̂, total_orbits + max_picard, false
+    @warn "find_periodic_orbit: did not converge in $(total_orbits + max_picard) orbits " *
+          "(rel = $(X_max > 0 ? E_norm/X_max : NaN))"
+    return s, T, E_norm, X_max, μ̂, total_orbits + max_picard, false
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -402,16 +404,16 @@ Linear interpolation of the branch amplitude ρ and period T at `re_target`
 (columns eta,Re,rho,omega,T; rows ordered along the branch).
 """
 function seed_from_branch(branch::Matrix{Float64}, re_target::Float64)
-	for i in 1:(size(branch, 1) - 1)
-		lo, hi = branch[i, 2], branch[i+1, 2]
-		if (lo - re_target) * (hi - re_target) <= 0.0 && lo != hi
-			w = (re_target - lo) / (hi - lo)
-			ρ = (1 - w) * branch[i, 3] + w * branch[i+1, 3]
-			T = (1 - w) * branch[i, 5] + w * branch[i+1, 5]
-			return ρ, T
-		end
-	end
-	return nothing
+    for i in 1:(size(branch, 1) - 1)
+        lo, hi = branch[i, 2], branch[i + 1, 2]
+        if (lo - re_target) * (hi - re_target) <= 0.0 && lo != hi
+            w = (re_target - lo) / (hi - lo)
+            ρ = (1 - w) * branch[i, 3] + w * branch[i + 1, 3]
+            T = (1 - w) * branch[i, 5] + w * branch[i + 1, 5]
+            return ρ, T
+        end
+    end
+    return nothing
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -435,16 +437,16 @@ error). The physical lift harmonics decay fast (j ≥ 2 are ~5 orders below the
 fundamental at Re 49.5), so K = 10 is generous.
 """
 function _periodic_lift(FL::Vector{Float64}, K::Int)
-	n = length(FL)
-	FL_per = zeros(Float64, n)
-	for j in 0:min(K, div(n - 1, 2))
-		c = sum(FL[k+1] * cis(-2π * j * k / n) for k in 0:(n-1)) / n
-		w = j == 0 ? 1.0 : 2.0
-		for k in 0:(n-1)
-			FL_per[k+1] += w * real(c * cis(2π * j * k / n))
-		end
-	end
-	return FL_per
+    n = length(FL)
+    FL_per = zeros(Float64, n)
+    for j in 0:min(K, div(n - 1, 2))
+        c = sum(FL[k + 1] * cis(-2π * j * k / n) for k in 0:(n - 1)) / n
+        w = j == 0 ? 1.0 : 2.0
+        for k in 0:(n - 1)
+            FL_per[k + 1] += w * real(c * cis(2π * j * k / n))
+        end
+    end
+    return FL_per
 end
 
 """
@@ -477,82 +479,82 @@ period; the flow is non-normal):
   μδ per period, so consecutive closures scale by μ).
 """
 function measure_orbit(s_po, η_prime, T, fom, ops, l_free, M_vel, vel_rows, area;
-		dt::Float64 = 5e-4)
-	L_klu, RHS_M, Δt_meas, n_steps = build_imex_operators(
-		ops.B₀, ops.B₁, ops.K_visc, η_prime, T, dt; θ = 0.5)
-	n_steps < 100 && @warn "measure_orbit: only $n_steps steps per period — " *
-		  "T collapsed towards Δt, upstream period gate failed?"
+        dt::Float64 = 5e-4)
+    L_klu, RHS_M, Δt_meas, n_steps = build_imex_operators(
+        ops.B₀, ops.B₁, ops.K_visc, η_prime, T, dt; θ = 0.5)
+    n_steps < 100 && @warn "measure_orbit: only $n_steps steps per period — " *
+          "T collapsed towards Δt, upstream period gate failed?"
 
-	V = Matrix{Float64}(undef, length(vel_rows), n_steps)
-	FL = Vector{Float64}(undef, n_steps)
-	record = function (k, sv)
-		@views V[:, k] .= sv[vel_rows]
-		FL[k] = dot(l_free, sv)
-		return nothing
-	end
+    V = Matrix{Float64}(undef, length(vel_rows), n_steps)
+    FL = Vector{Float64}(undef, n_steps)
+    record = function (k, sv)
+        @views V[:, k] .= sv[vel_rows]
+        FL[k] = dot(l_free, sv)
+        return nothing
+    end
 
-	s = copy(s_po)
-	f2 = similar(s)
-	rhs = similar(s)
-	fail = (; lift_max = NaN, lift_min = NaN, lift_mean = NaN,
-		lift_ringing = NaN, FL = FL, FL_per = FL, Δt_meas = Δt_meas,
-		avg_tke = NaN, periodicity_max = NaN, lift_amp_drift = NaN,
-		μ_meas = NaN, ok = false)
+    s = copy(s_po)
+    f2 = similar(s)
+    rhs = similar(s)
+    fail = (; lift_max = NaN, lift_min = NaN, lift_mean = NaN,
+        lift_ringing = NaN, FL = FL, FL_per = FL, Δt_meas = Δt_meas,
+        avg_tke = NaN, periodicity_max = NaN, lift_amp_drift = NaN,
+        μ_meas = NaN, ok = false)
 
-	ok = integrate_orbit!(s, n_steps, η_prime, fom, L_klu, RHS_M,
-		ops.h₀_vec, f2, rhs; on_step = record)
-	ok || return fail
+    ok = integrate_orbit!(s, n_steps, η_prime, fom, L_klu, RHS_M,
+        ops.h₀_vec, f2, rhs; on_step = record)
+    ok || return fail
 
-	# ── Period 2: pointwise periodicity check  d(t) = ‖v(t+T) − v(t)‖_{M_vel} ─
-	FL2 = Vector{Float64}(undef, n_steps)
-	w2 = zeros(Float64, length(vel_rows))
-	Mw2 = similar(w2)
-	d_max = 0.0
-	d_end = 0.0
-	check = function (k, sv)
-		@views w2 .= sv[vel_rows] .- V[:, k]
-		mul!(Mw2, M_vel, w2)
-		d = sqrt(max(dot(w2, Mw2), 0.0))
-		d_max = max(d_max, d)
-		k == n_steps && (d_end = d)   # ‖v(2T) − v(T)‖
-		FL2[k] = dot(l_free, sv)
-		return nothing
-	end
-	ok = integrate_orbit!(s, n_steps, η_prime, fom, L_klu, RHS_M,
-		ops.h₀_vec, f2, rhs; on_step = check)
-	ok || return fail
+    # ── Period 2: pointwise periodicity check  d(t) = ‖v(t+T) − v(t)‖_{M_vel} ─
+    FL2 = Vector{Float64}(undef, n_steps)
+    w2 = zeros(Float64, length(vel_rows))
+    Mw2 = similar(w2)
+    d_max = 0.0
+    d_end = 0.0
+    check = function (k, sv)
+        @views w2 .= sv[vel_rows] .- V[:, k]
+        mul!(Mw2, M_vel, w2)
+        d = sqrt(max(dot(w2, Mw2), 0.0))
+        d_max = max(d_max, d)
+        k == n_steps && (d_end = d)   # ‖v(2T) − v(T)‖
+        FL2[k] = dot(l_free, sv)
+        return nothing
+    end
+    ok = integrate_orbit!(s, n_steps, η_prime, fom, L_klu, RHS_M,
+        ops.h₀_vec, f2, rhs; on_step = check)
+    ok || return fail
 
-	v̄ = vec(sum(V, dims = 2)) ./ n_steps
-	w = similar(v̄)
-	Mw = similar(v̄)
-	tke_sum = 0.0
-	X_max_vel = 0.0
-	for k in 1:n_steps
-		@views w .= V[:, k]
-		mul!(Mw, M_vel, w)
-		X_max_vel = max(X_max_vel, sqrt(max(dot(w, Mw), 0.0)))
-		w .-= v̄
-		mul!(Mw, M_vel, w)
-		tke_sum += 0.5 * dot(w, Mw)
-	end
+    v̄ = vec(sum(V, dims = 2)) ./ n_steps
+    w = similar(v̄)
+    Mw = similar(v̄)
+    tke_sum = 0.0
+    X_max_vel = 0.0
+    for k in 1:n_steps
+        @views w .= V[:, k]
+        mul!(Mw, M_vel, w)
+        X_max_vel = max(X_max_vel, sqrt(max(dot(w, Mw), 0.0)))
+        w .-= v̄
+        mul!(Mw, M_vel, w)
+        tke_sum += 0.5 * dot(w, Mw)
+    end
 
-	# anchor mismatch of period 1: ‖v(T) − v(0)‖ → Floquet ratio with d_end
-	@views w .= V[:, n_steps] .- s_po[vel_rows]
-	mul!(Mw, M_vel, w)
-	d_anchor = sqrt(max(dot(w, Mw), 0.0))
-	μ_meas = (d_anchor > 0.0 && d_end > 0.0) ? d_end / d_anchor : NaN
+    # anchor mismatch of period 1: ‖v(T) − v(0)‖ → Floquet ratio with d_end
+    @views w .= V[:, n_steps] .- s_po[vel_rows]
+    mul!(Mw, M_vel, w)
+    d_anchor = sqrt(max(dot(w, Mw), 0.0))
+    μ_meas = (d_anchor > 0.0 && d_end > 0.0) ? d_end / d_anchor : NaN
 
-	FL_per = _periodic_lift(FL, 10)
-	FL2_per = _periodic_lift(FL2, 10)
-	amp1 = (maximum(FL_per) - minimum(FL_per)) / 2
-	amp2 = (maximum(FL2_per) - minimum(FL2_per)) / 2
+    FL_per = _periodic_lift(FL, 10)
+    FL2_per = _periodic_lift(FL2, 10)
+    amp1 = (maximum(FL_per) - minimum(FL_per)) / 2
+    amp2 = (maximum(FL2_per) - minimum(FL2_per)) / 2
 
-	return (; lift_max = maximum(FL_per), lift_min = minimum(FL_per),
-		lift_mean = sum(FL_per) / n_steps,
-		lift_ringing = maximum(abs.(FL .- FL_per)),
-		FL = FL, FL_per = FL_per, Δt_meas = Δt_meas,
-		avg_tke = tke_sum / n_steps / area,
-		periodicity_max = X_max_vel > 0.0 ? d_max / X_max_vel : NaN,
-		lift_amp_drift = amp1 > 0.0 ? abs(amp2 - amp1) / amp1 : NaN,
-		μ_meas = μ_meas, ok = true)
+    return (; lift_max = maximum(FL_per), lift_min = minimum(FL_per),
+        lift_mean = sum(FL_per) / n_steps,
+        lift_ringing = maximum(abs.(FL .- FL_per)),
+        FL = FL, FL_per = FL_per, Δt_meas = Δt_meas,
+        avg_tke = tke_sum / n_steps / area,
+        periodicity_max = X_max_vel > 0.0 ? d_max / X_max_vel : NaN,
+        lift_amp_drift = amp1 > 0.0 ? abs(amp2 - amp1) / amp1 : NaN,
+        μ_meas = μ_meas, ok = true)
 end

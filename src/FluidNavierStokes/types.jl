@@ -48,33 +48,35 @@ example driver, which meant the convention lived in a comment and depended on tw
 copies of `D` agreeing. It is applied once, here.
 """
 struct AssembledFluidModel{F, TB, TK, TR} <: AbstractAssembledModel
-	fom::F
-	Re₀::Float64
-	s₀_full::Vector{Float64}
-	B::TB
-	K_visc::TK
-	K_visc_rect::TR
-	h₀_vec::Vector{Float64}
-	info::NamedTuple
+    fom::F
+    Re₀::Float64
+    s₀_full::Vector{Float64}
+    B::TB
+    K_visc::TK
+    K_visc_rect::TR
+    h₀_vec::Vector{Float64}
+    info::NamedTuple
 end
 
 # The pre-`B` spelling. `getproperty` rather than a deprecation because these are read in
 # a research example whose numerics must not be disturbed by this rename.
 function Base.getproperty(m::AssembledFluidModel, s::Symbol)
-	s === :B₀ && return getfield(m, :B)[1]
-	s === :B₁ && return getfield(m, :B)[2]
-	return getfield(m, s)
+    s === :B₀ && return getfield(m, :B)[1]
+    s === :B₁ && return getfield(m, :B)[2]
+    return getfield(m, s)
 end
 
-Base.propertynames(::AssembledFluidModel, private::Bool = false) = (:fom, :Re₀, :s₀_full,
-	:B, :K_visc, :K_visc_rect, :h₀_vec, :info, :B₀, :B₁)
+function Base.propertynames(::AssembledFluidModel, private::Bool = false)
+    (:fom, :Re₀, :s₀_full,
+        :B, :K_visc, :K_visc_rect, :h₀_vec, :info, :B₀, :B₁)
+end
 
 function Base.show(io::IO, ::MIME"text/plain", m::AssembledFluidModel)
-	println(io, "AssembledFluidModel (Ferrite P2/P1 Taylor-Hood)")
-	println(io, "  Re₀       : $(m.Re₀)")
-	println(io, "  free DOFs : $(m.info.n_free) (steady state), $(m.info.n_free_dpim) (DPIM)")
-	println(io, "  operators : B₀ nnz=$(nnz(m.B[1]))  B₁ nnz=$(nnz(m.B[2]))  K_visc nnz=$(nnz(m.K_visc))")
-	print(io, "  base flow : ‖s₀‖∞ = $(maximum(abs, m.s₀_full))")
+    println(io, "AssembledFluidModel (Ferrite P2/P1 Taylor-Hood)")
+    println(io, "  Re₀       : $(m.Re₀)")
+    println(io, "  free DOFs : $(m.info.n_free) (steady state), $(m.info.n_free_dpim) (DPIM)")
+    println(io, "  operators : B₀ nnz=$(nnz(m.B[1]))  B₁ nnz=$(nnz(m.B[2]))  K_visc nnz=$(nnz(m.K_visc))")
+    print(io, "  base flow : ‖s₀‖∞ = $(maximum(abs, m.s₀_full))")
 end
 
 # The rows only this physics has. The shared skeleton (sizes, order, stage timings)
@@ -84,26 +86,27 @@ end
 # because there is no backend `parametrise` to build one. Everything needed is already
 # in `meta`, which is the point of returning it.
 function Common.summary_entries(m::AssembledFluidModel, meta::NamedTuple)
-	rows = Pair{String, Any}[
-		"model" => "2D Navier-Stokes, Ferrite P2/P1 Taylor-Hood",
-		"Re0" => m.Re₀,
-		"reference_length" => m.info.reference_length,
-	]
-	if haskey(meta, :spectrum)
-		λ = collect(meta.spectrum.eigenvalues)
-		push!(rows, "master_modes" => "$(length(λ))  (Hopf pair)")
-		push!(rows, "master_eigenvalues" => λ)
-	end
-	# The gauge changes what W and R MEAN, so it belongs in the record of the run and
-	# not only in the code that made it: coefficients from two gauges are not comparable.
-	haskey(meta, :scale) && push!(rows, "mode_scale" => meta.scale)
-	haskey(meta, :normalisation) &&
-		push!(rows, "mode_normalisation" => nameof(typeof(meta.normalisation)))
-	haskey(meta, :conjugate_permutation) &&
-		push!(rows, "conjugate_permutation" => meta.conjugate_permutation)
-	return rows
+    rows = Pair{String, Any}[
+        "model" => "2D Navier-Stokes, Ferrite P2/P1 Taylor-Hood",
+        "Re0" => m.Re₀,
+        "reference_length" => m.info.reference_length
+    ]
+    if haskey(meta, :spectrum)
+        λ = collect(meta.spectrum.eigenvalues)
+        push!(rows, "master_modes" => "$(length(λ))  (Hopf pair)")
+        push!(rows, "master_eigenvalues" => λ)
+    end
+    # The gauge changes what W and R MEAN, so it belongs in the record of the run and
+    # not only in the code that made it: coefficients from two gauges are not comparable.
+    haskey(meta, :scale) && push!(rows, "mode_scale" => meta.scale)
+    haskey(meta, :normalisation) &&
+        push!(rows, "mode_normalisation" => nameof(typeof(meta.normalisation)))
+    haskey(meta, :conjugate_permutation) &&
+        push!(rows, "conjugate_permutation" => meta.conjugate_permutation)
+    return rows
 end
 
-Common.summary_entries(m::AssembledFluidModel, ::Nothing) =
-	Pair{String, Any}["model" => "2D Navier-Stokes, Ferrite P2/P1 Taylor-Hood",
-		"Re0" => m.Re₀]
+function Common.summary_entries(m::AssembledFluidModel, ::Nothing)
+    Pair{String, Any}["model" => "2D Navier-Stokes, Ferrite P2/P1 Taylor-Hood",
+        "Re0" => m.Re₀]
+end

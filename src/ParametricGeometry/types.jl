@@ -15,8 +15,8 @@ The base coefficient `arrays[1]` (α = 0) goes into the model's `linear_terms`;
 every α ≠ 0 becomes a `MultilinearMap` correction.
 """
 struct ParametricOperator{N}
-	arrays::Vector
-	arity::NTuple{N, Int}
+    arrays::Vector
+    arity::NTuple{N, Int}
 end
 
 """
@@ -33,29 +33,30 @@ Build one with the physics' own entry point (`StructuralSVK.parametric_model`),
 then call [`build_model`](@ref).
 """
 struct AssembledParametricModel{Nθ, PD, B} <: AbstractAssembledModel
-	pd::PD
-	base::B                              # the physics' AbstractAssembledModel
-	operators::Vector{ParametricOperator}
-	maps::Vector{Any}                    # ParametricMap, one per nonlinear form
-	map_arities::Vector{Tuple}
-	n_geometry_parameters::Int
-	external_components::Vector{Int}
-	n_external_parameters::Int
-	info::NamedTuple
+    pd::PD
+    base::B                              # the physics' AbstractAssembledModel
+    operators::Vector{ParametricOperator}
+    maps::Vector{Any}                    # ParametricMap, one per nonlinear form
+    map_arities::Vector{Tuple}
+    n_geometry_parameters::Int
+    external_components::Vector{Int}
+    n_external_parameters::Int
+    info::NamedTuple
 end
 
 function AssembledParametricModel(pd::ParametricDiscretisation{Nθ}, base,
-	operators::Vector{ParametricOperator}, maps::Vector, map_arities::Vector;
-	external_components = collect(1:Nθ),
-	n_external_parameters::Integer = isempty(external_components) ? 0 : maximum(external_components),
-	info::NamedTuple = NamedTuple()) where {Nθ}
-	length(external_components) == Nθ || throw(ArgumentError(
-		"external_components must map all $Nθ geometry parameters"))
-	all(c -> 1 <= c <= n_external_parameters, external_components) || throw(ArgumentError(
-		"external component mapping is outside 1:$n_external_parameters"))
-	return AssembledParametricModel{Nθ, typeof(pd), typeof(base)}(
-		pd, base, operators, collect(Any, maps), collect(Tuple, map_arities), Nθ,
-		collect(Int, external_components), Int(n_external_parameters), info)
+        operators::Vector{ParametricOperator}, maps::Vector, map_arities::Vector;
+        external_components = collect(1:Nθ),
+        n_external_parameters::Integer = isempty(external_components) ? 0 :
+                                         maximum(external_components),
+        info::NamedTuple = NamedTuple()) where {Nθ}
+    length(external_components) == Nθ || throw(ArgumentError(
+        "external_components must map all $Nθ geometry parameters"))
+    all(c -> 1 <= c <= n_external_parameters, external_components) || throw(ArgumentError(
+        "external component mapping is outside 1:$n_external_parameters"))
+    return AssembledParametricModel{Nθ, typeof(pd), typeof(base)}(
+        pd, base, operators, collect(Any, maps), collect(Tuple, map_arities), Nθ,
+        collect(Int, external_components), Int(n_external_parameters), info)
 end
 
 """
@@ -70,21 +71,22 @@ the fourth linear block is zero. A first-order physics with only a
 `(1,)`-arity correction needs no augmentation and must not get one.
 """
 function model_order(m::AssembledParametricModel)
-	isempty(m.operators) && return 0
-	return maximum(length(op.arity) for op in m.operators)
+    isempty(m.operators) && return 0
+    return maximum(length(op.arity) for op in m.operators)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", m::AssembledParametricModel{Nθ}) where {Nθ}
-	n_corr = 0
-	for op in m.operators
-		n_corr += count(!all(iszero, α) for α in basis(m.pd).mset.exponents)
-	end
-	println(io, "AssembledParametricModel")
-	println(io, "  parameters : $Nθ (θ-terms: $(nterms(m.pd)))")
-	println(io, "  free DOFs  : $(m.pd.n_free)")
-	println(io, "  base       : $(nameof(typeof(m.base)))")
-	println(io, "  operators  : $(length(m.operators)) (arities " *
-				join([string(op.arity) for op in m.operators], ", ") * ")")
-	print(io, "  maps       : $(length(m.maps)) nonlinear form" *
-			  (length(m.maps) == 1 ? "" : "s"))
+    n_corr = 0
+    for op in m.operators
+        n_corr += count(!all(iszero, α) for α in basis(m.pd).mset.exponents)
+    end
+    println(io, "AssembledParametricModel")
+    println(io, "  parameters : $Nθ (θ-terms: $(nterms(m.pd)))")
+    println(io, "  free DOFs  : $(m.pd.n_free)")
+    println(io, "  base       : $(nameof(typeof(m.base)))")
+    println(io,
+        "  operators  : $(length(m.operators)) (arities " *
+        join([string(op.arity) for op in m.operators], ", ") * ")")
+    print(io, "  maps       : $(length(m.maps)) nonlinear form" *
+              (length(m.maps) == 1 ? "" : "s"))
 end
