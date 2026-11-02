@@ -43,43 +43,52 @@ function _accumulate_fluid_convection_pair!(accum, u1, u2, fom,
         adjugate_at, factor, layout1::Val = Val(:free), layout2::Val = Val(:free),
         same_state::Val{SAME} = Val(false)) where {SAME}
     T = promote_type(eltype(accum), eltype(u1), eltype(u2), typeof(factor))
+    # `setup_fem` used the long field names before formulation version 3 and
+    # the compact aliases afterwards.  Parametric models are checkpointed, so
+    # nonlinear-shell continuation must accept both layouts even though newly
+    # assembled models use only the compact names.
+    dh = hasproperty(fom, :dof_handler) ? fom.dof_handler : fom.dh
+    cell_values = hasproperty(fom, :velocity_cell_values) ?
+        fom.velocity_cell_values : fom.cv_vel
+    dof_to_free = hasproperty(fom, :dof_to_free_dpim) ?
+        fom.dof_to_free_dpim : fom.free_to_local_dpim
     ue1 = zeros(T, fom.n_vel_dofs_per_cell)
     ue2 = SAME ? ue1 : similar(ue1)
-    Fe = zeros(T, ndofs_per_cell(fom.dof_handler))
-    for (ci, cell) in enumerate(CellIterator(fom.dof_handler))
-        reinit!(fom.velocity_cell_values, cell)
+    Fe = zeros(T, ndofs_per_cell(dh))
+    for (ci, cell) in enumerate(CellIterator(dh))
+        reinit!(cell_values, cell)
         dofs = celldofs(cell)
         for (local_index, dof) in enumerate(dofs[fom.dof_range_u])
-            free = get(fom.dof_to_free_dpim, dof, 0)
+            free = get(dof_to_free, dof, 0)
             ue1[local_index] = _fluid_state_value(u1, dof, free, layout1, T)
             SAME || (ue2[local_index] = _fluid_state_value(u2, dof, free, layout2, T))
         end
         fill!(Fe, zero(T))
-        for q in 1:getnquadpoints(fom.velocity_cell_values)
-            dOmega = getdetJdV(fom.velocity_cell_values, q)
+        for q in 1:getnquadpoints(cell_values)
+            dOmega = getdetJdV(cell_values, q)
             A = adjugate_at(ci, q)
-            u1q = function_value(fom.velocity_cell_values, q, ue1)
-            grad1 = function_gradient(fom.velocity_cell_values, q, ue1)
+            u1q = function_value(cell_values, q, ue1)
+            grad1 = function_gradient(cell_values, q, ue1)
             if !isnothing(A)
                 grad1 = grad1 ⋅ A
             end
             convection = if SAME
                 grad1 ⋅ u1q
             else
-                u2q = function_value(fom.velocity_cell_values, q, ue2)
-                grad2 = function_gradient(fom.velocity_cell_values, q, ue2)
+                u2q = function_value(cell_values, q, ue2)
+                grad2 = function_gradient(cell_values, q, ue2)
                 isnothing(A) || (grad2 = grad2 ⋅ A)
                 0.5 * (grad2 ⋅ u1q + grad1 ⋅ u2q)
             end
             for local_index in 1:fom.n_vel_dofs_per_cell
                 row = fom.dof_range_u[local_index]
                 Fe[row] -= factor *
-                           (shape_value(fom.velocity_cell_values, q, local_index) ⋅
+                           (shape_value(cell_values, q, local_index) ⋅
                             convection) * dOmega
             end
         end
         for (local_index, dof) in enumerate(dofs)
-            row = get(fom.dof_to_free_dpim, dof, 0)
+            row = get(dof_to_free, dof, 0)
             row == 0 || (accum[row] += Fe[local_index])
         end
     end
