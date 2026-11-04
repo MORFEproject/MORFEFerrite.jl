@@ -124,7 +124,7 @@ function build_model(m::AssembledFluidModel, eig;
     # the Hopf pair was two unrelated modes.
     σ_full = vcat(σ_master, collect((ROM + 1):(ROM + length(λ_outer))))
 
-    spectral = SpectralData(; eigenvalues = λ_master,
+    spectral = SpectralData(; diagonal = λ_master,
         right_modes = Φ, left_modes = Ψ,
         outer_eigenvalues = λ_outer,
         conjugate_permutation = σ_full === nothing ? σ_master : σ_full)

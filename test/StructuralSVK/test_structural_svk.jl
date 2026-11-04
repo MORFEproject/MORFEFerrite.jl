@@ -89,11 +89,11 @@ const _order = 3
     left_modes_derivatives = eigenproblem.left_eigenmodes_orders[:, 1:1, 1:ROM]
     resonance_set = resonance_set_from_complex_normal_form_style(
         mset, Vector{ComplexF64}(master_eigenvalues), 0.05)
-    spectral = SpectralData(; eigenvalues = master_eigenvalues,
+    spectral = SpectralData(; diagonal = master_eigenvalues,
         right_modes = master_modes, right_derivatives = master_modes_derivatives,
         left_modes = left_eigenmodes, left_blocks = Array(left_modes_derivatives),
         conjugate_permutation = [2, 1])
-    W_ref, R_ref = solve_cohomological_problem(model, mset, spectral, resonance_set)
+    W_ref, R_ref = solve_parametrisation(model, mset, spectral, resonance_set)
 
     @test beam.info.n_dofs == n_free
     a = rom.R.poly.coefficients

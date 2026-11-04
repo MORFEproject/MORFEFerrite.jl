@@ -91,11 +91,11 @@ function _reference_rom(master::Vector{Int}, order::Int, nev::Int)
     resonance_set = resonance_set_from_complex_normal_form_style(
         mset, Vector{ComplexF64}(master_eigenvalues), tol)
     perm = reduce(vcat, [[2p, 2p - 1] for p in 1:length(master)])
-    spectral = SpectralData(; eigenvalues = master_eigenvalues,
+    spectral = SpectralData(; diagonal = master_eigenvalues,
         right_modes = master_modes, right_derivatives = master_modes_derivatives,
         left_modes = left_eigenmodes, left_blocks = Array(left_modes_derivatives),
         conjugate_permutation = perm)
-    W, R = solve_cohomological_problem(model, mset, spectral, resonance_set)
+    W, R = solve_parametrisation(model, mset, spectral, resonance_set)
     return R, eigenvalues
 end
 
