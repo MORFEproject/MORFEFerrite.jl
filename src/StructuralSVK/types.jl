@@ -33,6 +33,33 @@ end
 RayleighDamping(; α, β) = RayleighDamping(promote(α, β)...)
 
 """
+    SurfacePressure(; boundary, pressure = 1.0)
+    SurfacePressure(; boundaries, pressure = 1.0)
+
+Uniform dead pressure. `boundary` selects a named Ferrite or Gmsh facet set;
+`boundaries` selects one-based COMSOL boundary entity IDs. `pressure` is a
+scalar multiplier; its spatial load vector is assembled separately from the
+mesh and can therefore be coupled to any external system by a caller.
+"""
+struct SurfacePressure{B,T}
+    boundary::B
+    pressure::T
+end
+
+function SurfacePressure(; boundary = nothing, boundaries = nothing, pressure = 1.0)
+    (boundary === nothing) == (boundaries === nothing) &&
+        throw(ArgumentError("pass exactly one of `boundary` or `boundaries`"))
+    if boundary !== nothing
+        boundary isa AbstractString || throw(ArgumentError("`boundary` must be a named facet set"))
+        return SurfacePressure(String(boundary), pressure)
+    end
+    ids = Set(Int.(collect(boundaries)))
+    isempty(ids) && throw(ArgumentError("SurfacePressure requires at least one boundary"))
+    any(<=(0), ids) && throw(ArgumentError("COMSOL boundary IDs are one-based positive integers"))
+    return SurfacePressure(ids, pressure)
+end
+
+"""
     HarmonicForcing(; mode, amplitude, Ω = nothing)
 
 Harmonic load specification for

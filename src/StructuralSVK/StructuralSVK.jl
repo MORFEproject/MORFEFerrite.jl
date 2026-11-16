@@ -107,6 +107,7 @@ function svk_assemble_KM!(K, M, dof_handler, cell_values, λ::Real, μ::Real, ρ
     assemble_KM!(K, M, dof_handler, cell_values, λ, μ, ρ)
 end
 include("mechanical_model.jl")
+include("pressure_load.jl")
 include("build_model.jl")
 include("parametrise.jl")
 include("postprocess.jl")
@@ -117,7 +118,7 @@ include("pullback_kernel.jl")
 include("parametric_model.jl")
 
 export SVKMaterial, AnisotropicMaterial, CubicCrystal, rotate_voigt, voigt_stiffness,
-       RayleighDamping, HarmonicForcing,
+       RayleighDamping, SurfacePressure, surface_pressure_vector, HarmonicForcing,
        AssembledMechanicalModel,
        mechanical_model, spectrum, eigenfrequencies, print_mode_table, probe_dof,
        resonances, print_resonances,

@@ -109,5 +109,7 @@ function _mechanical_model(grid::Ferrite.Grid, clamped, dirichlet_label;
         (n_dofs = n_free, n_dofs_total = ndofs(dof_handler), backend = "Ferrite",
             fe_order = fe_order, quad_order = quad_order, dirichlet = dirichlet_label,
             dof_handler = dof_handler, cell_values = cell_values,
+            displacement_interpolation = displacement_interpolation,
+            geometry_interpolation = geometry_interpolation,
             dof_to_free = dof_to_free))
 end
