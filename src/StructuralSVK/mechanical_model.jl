@@ -2,18 +2,98 @@
 _refshape(::Ferrite.AbstractCell{RS}) where {RS} = RS
 
 """
+    default_quad_order(RefShape, fe_order) -> Int
+    default_quad_order(grid::Ferrite.Grid, fe_order) -> Int
+
+The quadrature order [`mechanical_model`](@ref) uses when none is given: the lowest that
+integrates the element mass matrix of `Lagrange{RefShape, fe_order}` exactly. The grid
+method takes the reference shape of the grid's first cell.
+
+Ferrite reads `QuadratureRule{RefShape}(n)` as Gauss points per direction on hexahedra
+but as a total polynomial degree on tetrahedra, prisms and pyramids, so the default
+differs by shape:
+
+| Reference shape  | Mass integrand ``N_i N_j``                     | Default  |
+|:---------------- |:---------------------------------------------- |:-------- |
+| `RefHexahedron`  | degree `2p` in each direction                  | `p + 1`  |
+| `RefTetrahedron` | total degree `2p`                              | `2p`     |
+| `RefPrism`       | total degree `4p` (triangle ⊗ line, each `2p`) | `4p`     |
+| `RefPyramid`     | rational, never exact                          | `2p + 2` |
+
+Pyramid shape functions are rational, so no rule integrates them exactly; `2p + 2` gives
+a full-rank element mass matrix for `p ≤ 2`, and for `p = 2` it is Ferrite's highest
+pyramid rule. Below the default an element can have fewer quadrature points than shape
+functions; [`mechanical_model`](@ref) warns when the element mass matrix is then singular
+or indefinite.
+"""
+default_quad_order(::Type{<:Ferrite.RefHypercube}, fe_order::Integer) = fe_order + 1
+default_quad_order(::Type{<:Ferrite.RefSimplex}, fe_order::Integer) = 2fe_order
+default_quad_order(::Type{RefPrism}, fe_order::Integer) = 4fe_order
+default_quad_order(::Type{RefPyramid}, fe_order::Integer) = 2fe_order + 2
+function default_quad_order(grid::Ferrite.Grid, fe_order::Integer)
+    default_quad_order(_refshape(Ferrite.getcells(grid, 1)), fe_order)
+end
+
+"""
+    _check_mass_quadrature(RefShape, fe_order, quadrature_rule, quad_order)
+
+Warn when `quadrature_rule` makes the element mass matrix of `Lagrange{RefShape,
+fe_order}` singular or indefinite on the reference element.
+
+With positive weights the rank found here is that of every cell with a positive Jacobian:
+the cell matrix is `Σ_q w_q det J_q N(ξ_q) N(ξ_q)ᵀ`, whose rank does not depend on the
+positive factors `w_q det J_q`. A singular element matrix does not always make the
+assembled `M` singular, because neighbours can cover its null space, but a cell with
+enough unshared nodes (a corner of the mesh) leaves a null vector of `M`, and possibly of
+`K` too, and then `s²M + sC + K` is singular for every `s`.
+"""
+function _check_mass_quadrature(::Type{RefShape}, fe_order::Int, quadrature_rule,
+        quad_order::Int) where {RefShape}
+    interpolation = Lagrange{RefShape, fe_order}()
+    n = getnbasefunctions(interpolation)
+    mass = zeros(n, n)
+    values = zeros(n)
+    for (ξ, w) in zip(Ferrite.getpoints(quadrature_rule), Ferrite.getweights(quadrature_rule))
+        for i in 1:n
+            values[i] = Ferrite.reference_shape_value(interpolation, ξ, i)
+        end
+        mass .+= w .* (values * values')
+    end
+    λ = eigvals(Symmetric(mass))
+    tol = 1e-10 * λ[end]
+    λ[1] > tol && return nothing
+    defect = λ[1] < -tol ? "indefinite" : "singular"
+    @warn """
+          quad_order = $quad_order is too low for Lagrange{$RefShape, $fe_order}: the \
+          element mass matrix is $defect (only $(count(>(tol), λ)) of its $n eigenvalues \
+          are positive, with $(getnquadpoints(quadrature_rule)) quadrature points). The \
+          assembled M can then be $defect too, which makes the cohomological equations \
+          ill-posed. The default for this element is quad_order = \
+          $(default_quad_order(RefShape, fe_order)); see `default_quad_order`.
+          """
+    return nothing
+end
+
+"""
     mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
-                     material, damping, fe_order = 2, quad_order = fe_order + 1)
-    mechanical_model(grid::Ferrite.Grid; material, damping, dirichlet,
-                     fe_order = 2, quad_order = fe_order + 1)
+                     material, damping, fe_order = 2,
+                     quad_order = default_quad_order(RefShape, fe_order))
+    mechanical_model(grid::Ferrite.Grid; material, damping, dirichlet, fe_order = 2,
+                     quad_order = default_quad_order(RefShape, fe_order))
     mechanical_model(mesh_path::AbstractString; material, damping, dirichlet,
-                     scale = 1.0, fe_order = 2, quad_order = fe_order + 1)
+                     scale = 1.0, fe_order = 2,
+                     quad_order = default_quad_order(RefShape, fe_order))
 
 Assemble a three-dimensional `AssembledMechanicalModel` from a Ferrite grid or
 mesh file. The displacement interpolation is `Lagrange{RefShape,fe_order}()^3`;
 the returned `K`, `M`, and `C = αM + βK` are restricted to free DOFs, while the
 model retains the Ferrite objects needed to construct its quadratic and cubic
 SVK terms lazily.
+
+`quad_order` defaults to [`default_quad_order`](@ref), the lowest order that integrates
+the element mass matrix exactly: `fe_order + 1` Gauss points per direction on hexahedra,
+degree `2fe_order` on tetrahedra and `4fe_order` on prisms. A lower order is accepted, with
+a warning if it leaves the element mass matrix singular or indefinite.
 
 `material` is an [`SVKMaterial`](@ref) or [`AnisotropicMaterial`](@ref), and
 `damping` is a [`RayleighDamping`](@ref). All three displacement components are
@@ -40,7 +120,7 @@ function mechanical_model(grid::Ferrite.Grid, constrained_nodes::Set{Int};
         material::Union{SVKMaterial, AnisotropicMaterial},
         damping::RayleighDamping,
         fe_order::Int = 2,
-        quad_order::Int = fe_order + 1)
+        quad_order::Int = default_quad_order(grid, fe_order))
     _mechanical_model(grid, constrained_nodes,
         "$(length(constrained_nodes)) constrained nodes";
         material, damping, fe_order, quad_order)
@@ -51,7 +131,7 @@ function mechanical_model(grid::Ferrite.Grid;
         damping::RayleighDamping,
         dirichlet::String,
         fe_order::Int = 2,
-        quad_order::Int = fe_order + 1)
+        quad_order::Int = default_quad_order(grid, fe_order))
     _mechanical_model(grid, getfacetset(grid, dirichlet), dirichlet;
         material, damping, fe_order, quad_order)
 end
@@ -75,6 +155,7 @@ function _mechanical_model(grid::Ferrite.Grid, clamped, dirichlet_label;
     RefShape = _refshape(cell1)
     displacement_interpolation = Lagrange{RefShape, fe_order}()^3
     quadrature_rule = QuadratureRule{RefShape}(quad_order)
+    _check_mass_quadrature(RefShape, fe_order, quadrature_rule, quad_order)
     geometry_interpolation = Ferrite.geometric_interpolation(typeof(cell1))
     cell_values = CellValues(quadrature_rule, displacement_interpolation,
         geometry_interpolation)

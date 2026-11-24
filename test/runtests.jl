@@ -14,6 +14,7 @@ using Test
         include("StructuralSVK/test_master_selection.jl")
         include("StructuralSVK/test_flux_summation.jl")
         include("StructuralSVK/test_pressure_load.jl")
+        include("StructuralSVK/test_quadrature_order.jl")
     end
 
     # The physics-blind parametric coordinate transform, gated six ways: against a
